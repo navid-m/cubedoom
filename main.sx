@@ -14,13 +14,15 @@ val fmt = use("std/fmt")
 val MAP_SIZE: i32 = 32
 val TILE_SIZE: i32 = 64
 val MAP_PATH: ref u8 = "maps/cubedoom.map"
+val PROGRESS_PATH: ref u8 = "progress.bin"
 val SCREEN_WIDTH: i32 = 1280
 val SCREEN_HEIGHT: i32 = 960
-val MAX_ENEMIES: i32 = 6
-val MAX_BULLETS: i32 = 32
+val MAX_ENEMIES: i32 = 10
+val MAX_BULLETS: i32 = 96
+val MAX_XP_ORBS: i32 = 96
 val MAX_TREES: i32 = 20
 val MAX_HEALTH_PICKUPS: i32 = 6
-val MAX_BILLBOARDS: i32 = 64
+val MAX_BILLBOARDS: i32 = 320
 val MAX_STARS: i32 = 160
 val ENEMY_SPEED: f32 = 50.0
 val BULLET_SPEED: f32 = 250.0
@@ -32,6 +34,20 @@ val WALL_UNITS: f32 = 128.0
 val CELL_TEX_REPEATS: f32 = 1.0
 val WALL_TEX_REPEATS: i32 = 2
 val SPRINT_MULTIPLIER: f32 = 1.7
+val PROGRESS_MAGIC: u32 = 0x43554245
+val PROGRESS_VERSION: u32 = 1
+val PROGRESS_XOR: u32 = 0x5A17C0DE
+val STATE_MENU: i32 = 0
+val STATE_PLAYING: i32 = 1
+val STATE_SHOP: i32 = 2
+val STATE_DEAD: i32 = 3
+val WEAPON_MACHINE_GUN: i32 = 0
+val WEAPON_SHOTGUN: i32 = 1
+val WEAPON_PLASMA: i32 = 2
+val MAX_HEALTH_LEVEL: i32 = 5
+val MAX_DAMAGE_LEVEL: i32 = 5
+val MAX_FIRE_RATE_LEVEL: i32 = 4
+val MAX_SPEED_LEVEL: i32 = 4
 
 extern type SDL_Rect = {
     x: mut i32
@@ -92,6 +108,8 @@ extern type Bullet = {
     alive: mut i32
     isPlayer: mut i32
     animTime: mut f32
+    damage: mut i32
+    weapon: mut i32
 }
 
 type WallTexture = {
@@ -133,6 +151,29 @@ type HealthPickup = {
     active: mut i32
     respawn: mut f32
     bob: mut f32
+}
+
+type XpOrb = {
+    x: mut f32
+    y: mut f32
+    value: mut i32
+    active: mut i32
+    phase: mut f32
+}
+
+type Progress = {
+    magic: mut u32
+    version: mut u32
+    checksum: mut u32
+    bestWave: mut i32
+    xp: mut i32
+    totalXp: mut i32
+    shotgun: mut i32
+    plasma: mut i32
+    healthLevel: mut i32
+    damageLevel: mut i32
+    fireRateLevel: mut i32
+    speedLevel: mut i32
 }
 
 type Star = {
@@ -271,7 +312,7 @@ extern (C) fn atan2f(y: f32, x: f32) f32 = "atan2f"
 
 val map: mut [32][32]i32 = @zeroed
 val wallTextures: mut [3]WallTexture = @zeroed
-val enemySpawns: mut [6]SpawnPoint = @zeroed
+val enemySpawns: mut [10]SpawnPoint = @zeroed
 
 val player: mut Player = {
     x: 96.0,
@@ -333,6 +374,94 @@ val g_hurtSound: mut ref void = none
 val g_pickupSound: mut ref void = none
 val g_footstepSound: mut ref void = none
 
+val g_machineGunTex: mut ref void = none
+val g_shotgunTex: mut ref void = none
+val g_shotgunReload1Tex: mut ref void = none
+val g_shotgunReload2Tex: mut ref void = none
+val g_plasmaTex: mut ref void = none
+val g_boothTex: mut ref void = none
+val boothTexW: mut i32 = 1
+val boothTexH: mut i32 = 1
+
+val xpOrbs: mut [96]XpOrb = @zeroed
+val progress: mut Progress = @zeroed
+val gameState: mut i32 = 0
+val wave: mut i32 = 1
+val waveTarget: mut i32 = 4
+val waveKilled: mut i32 = 0
+val waveSpawned: mut i32 = 0
+val waveIntermission: mut f32 = 0.0
+val boothX: mut f32 = 0.0
+val boothY: mut f32 = 0.0
+val boothFound: mut bool = false
+val playerZ: mut f32 = 0.0
+val playerVZ: mut f32 = 0.0
+val onGround: mut bool = true
+val currentWeapon: mut i32 = 0
+val weaponEquip: mut f32 = 1.0
+val shotgunReloadTimer: mut f32 = 0.0
+val shotgunReloadStage: mut i32 = 0
+val relativeMouseMode: mut i32 = 0
+val quitRequested: mut bool = false
+
+val g_shootShotgunSound: mut ref void = none
+val g_shootPlasmaSound: mut ref void = none
+val g_switchMachineSound: mut ref void = none
+val g_switchShotgunSound: mut ref void = none
+val g_switchPlasmaSound: mut ref void = none
+val g_reloadShotgun1Sound: mut ref void = none
+val g_reloadShotgun2Sound: mut ref void = none
+val g_jumpSound: mut ref void = none
+val g_xpSound: mut ref void = none
+val g_buySound: mut ref void = none
+val g_clickSound: mut ref void = none
+val g_waveSound: mut ref void = none
+val g_deathSound: mut ref void = none
+
+val inputMouseX: mut i32 = 0
+val inputMouseY: mut i32 = 0
+val inputClick: mut bool = false
+val inputEPressed: mut bool = false
+val inputEscapePressed: mut bool = false
+val inputEnterPressed: mut bool = false
+val inputSpacePressed: mut bool = false
+val inputNum1: mut bool = false
+val inputNum2: mut bool = false
+val inputNum3: mut bool = false
+val inputNum4: mut bool = false
+val inputNum5: mut bool = false
+val inputNum6: mut bool = false
+val prevE: mut u8 = 0
+val prevEscape: mut u8 = 0
+val prevEnter: mut u8 = 0
+val prevSpace: mut u8 = 0
+val prevNum1: mut u8 = 0
+val prevNum2: mut u8 = 0
+val prevNum3: mut u8 = 0
+val prevNum4: mut u8 = 0
+val prevNum5: mut u8 = 0
+val prevNum6: mut u8 = 0
+val prevMouseDown: mut bool = false
+val uiMouseX: mut i32 = 0
+val uiMouseY: mut i32 = 0
+
+// 5x7 bitmap font, ASCII 32..126. Each glyph is seven rows of five bits,
+// least-significant bit = leftmost column. Lowercase is folded to uppercase.
+val FONT_GLYPHS: [95]u64 = [
+    0, 134353028, 330, 217415040, 4777777604, 289881251, 1035966542, 132,
+    138549380, 205656196, 145860, 139432064, 4429185024, 458752, 134217728, 2221019400,
+    480623950, 1010962566, 505553167, 511981838, 301316492, 511981646, 480623694, 205664527,
+    481638734, 210185582, 134221824, 4429189120, 25369344, 32537600, 3551328, 138555662,
+    4227771840, 922040774, 532131183, 471926862, 515239279, 472320078, 69666894, 497912910,
+    381136235, 474091662, 511975694, 918003179, 1008797762, 866123643, 385334635, 482209134,
+    69692238, 9072143726, 918007151, 512104558, 138547359, 482209659, 216344955, 348126769,
+    920852939, 138557787, 1042493727, 406982788, 8862701634, 205656196, 326, 0,
+    6, 922040774, 532131183, 471926862, 515239279, 472320078, 69666894, 497912910,
+    381136235, 474091662, 511975694, 918003179, 1008797762, 866123643, 385334635, 482209134,
+    69692238, 9072143726, 918007151, 512104558, 138547359, 482209659, 216344955, 348126769,
+    920852939, 138557787, 1042493727, 406984836, 4433514628, 205664388, 1015808,
+]
+
 fn get_enemy(i: i32) mut ref Enemy = {
     return trust @ptradd(enemies_buf, (i as usize) * @sizeof(Enemy)) as mut ref Enemy
 }
@@ -387,6 +516,13 @@ fn pickup_at(index: i32) mut ref HealthPickup = {
     ) as mut ref HealthPickup
 }
 
+fn xp_orb_at(index: i32) mut ref XpOrb = {
+    return trust @ptradd(
+        xpOrbs as ref XpOrb,
+        (index as usize) * @sizeof(XpOrb)
+    ) as mut ref XpOrb
+}
+
 fn star_at(index: i32) mut ref Star = {
     return trust @ptradd(stars as ref Star, (index as usize) * @sizeof(Star)) as mut ref Star
 }
@@ -411,6 +547,1383 @@ fn play_sound(sound: ref void) void = {
     if sound != none {
         trust Mix_PlayChannel(-1 as i32, sound, 0 as i32)
     }
+}
+
+fn load_sound(path: ref u8, volume: i32) ref void = trust {
+    val sound: ref void = Mix_LoadWAV(path)
+    if sound != none {
+        Mix_VolumeChunk(sound, volume)
+    }
+    return sound
+}
+
+fn font_glyph(c: u8) u64 = trust {
+    val folded: mut i32 = c as i32
+    if folded >= 97 && folded <= 122 {
+        folded -= 32
+    }
+    val index: i32 = folded - 32
+    if index < 0 || index >= 95 {
+        return 0
+    }
+    return @load(@ptradd(FONT_GLYPHS as ref u64, (index as usize) * 8)) as u64
+}
+
+fn text_width(text: ref u8, scale: i32) i32 = trust {
+    val count: i32 = @strlen(text) as i32
+    if count <= 0 {
+        return 0
+    }
+    return count * 6 * scale - scale
+}
+
+fn draw_text(
+    x: i32,
+    y: i32,
+    text: ref u8,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    if scale < 1 {
+        return
+    }
+    SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, ca)
+    val penX: mut i32 = x
+    val cursor: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(text, cursor as usize))
+        if c == 0 {
+            break
+        }
+        val glyph: u64 = font_glyph(c)
+        for row = 0, row < 7, row++ {
+            val mask: u32 = ((glyph >> ((row * 5) as u64)) & 31 as u64) as u32
+            val column: mut i32 = 0
+            for column < 5 {
+                val bitMask: u32 = 1 as u32 << (column as u32)
+                if (mask & bitMask) == 0 {
+                    column++
+                } else {
+                    val runStart: i32 = column
+                    for {
+                        column++
+                        if column >= 5 {
+                            break
+                        }
+                        val nextMask: u32 = 1 as u32 << (column as u32)
+                        if (mask & nextMask) == 0 {
+                            break
+                        }
+                    }
+                    g_aux_rect.x = penX + runStart * scale
+                    g_aux_rect.y = y + row * scale
+                    g_aux_rect.w = (column - runStart) * scale
+                    g_aux_rect.h = scale
+                    SDL_RenderFillRect(g_renderer, g_aux_rect)
+                }
+            }
+        }
+        penX += 6 * scale
+        cursor++
+    }
+    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn draw_text_centered(
+    centerX: i32,
+    y: i32,
+    text: ref u8,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val width: i32 = text_width(text, scale)
+    draw_text(centerX - width / 2, y, text, scale, cr, cg, cb, ca)
+}
+
+fn draw_int(
+    x: i32,
+    y: i32,
+    value: i32,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val digits: mut [16]u8 = @zeroed
+    val number: mut i32 = value
+    val negative: bool = number < 0
+    if negative {
+        number = -number
+    }
+
+    val digitCount: mut i32 = 0
+    if number == 0 {
+        @store8(digits as ref u8, 48 as u8)
+        digitCount = 1
+    } else {
+        for {
+            if number <= 0 {
+                break
+            }
+            val digit: i32 = number % 10
+            @store8(@ptradd(digits as ref u8, digitCount as usize), (48 + digit) as u8)
+            digitCount++
+            number = number / 10
+        }
+    }
+
+    val buffer: mut [24]u8 = @zeroed
+    val position: mut i32 = 0
+    if negative {
+        @store8(buffer as ref u8, 45 as u8)
+        position = 1
+    }
+    for i = 0, i < digitCount, i++ {
+        val digit: u8 = @load8(@ptradd(
+                digits as ref u8,
+                (digitCount - 1 - i) as usize
+            ))
+        @store8(@ptradd(buffer as ref u8, (position + i) as usize), digit)
+    }
+    @store8(@ptradd(buffer as ref u8, (position + digitCount) as usize), 0 as u8)
+    draw_text(x, y, buffer as ref u8, scale, cr, cg, cb, ca)
+}
+
+fn point_in(x: i32, y: i32, w: i32, h: i32, px: i32, py: i32) bool = {
+    return px >= x && px < x + w && py >= y && py < y + h
+}
+
+fn draw_panel(x: i32, y: i32, w: i32, h: i32, cr: u8, cg: u8, cb: u8, ca: u8) void = trust {
+    SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, ca)
+    g_aux_rect.x = x
+    g_aux_rect.y = y
+    g_aux_rect.w = w
+    g_aux_rect.h = h
+    SDL_RenderFillRect(g_renderer, g_aux_rect)
+    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn draw_border(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    thickness: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    draw_panel(x, y, w, thickness, cr, cg, cb, ca)
+    draw_panel(x, y + h - thickness, w, thickness, cr, cg, cb, ca)
+    draw_panel(x, y, thickness, h, cr, cg, cb, ca)
+    draw_panel(x + w - thickness, y, thickness, h, cr, cg, cb, ca)
+}
+
+fn draw_button(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    label: ref u8,
+    hover: bool
+) void = trust {
+    if hover {
+        draw_panel(x - 4, y - 4, w + 8, h + 8, 255 as u8, 190 as u8, 60 as u8, 105 as u8)
+        draw_panel(x, y, w, h, 42 as u8, 34 as u8, 18 as u8, 245 as u8)
+        draw_border(x, y, w, h, 3, 255 as u8, 205 as u8, 80 as u8, 255 as u8)
+        draw_text_centered(
+            x + w / 2,
+            y + (h - 7 * 4) / 2,
+            label,
+            4,
+            255 as u8,
+            240 as u8,
+            190 as u8,
+            255 as u8
+        )
+    } else {
+        draw_panel(x, y, w, h, 16 as u8, 20 as u8, 26 as u8, 230 as u8)
+        draw_border(x, y, w, h, 2, 92 as u8, 112 as u8, 132 as u8, 255 as u8)
+        draw_text_centered(
+            x + w / 2,
+            y + (h - 7 * 4) / 2,
+            label,
+            4,
+            215 as u8,
+            225 as u8,
+            235 as u8,
+            255 as u8
+        )
+    }
+}
+
+fn max_health() i32 = {
+    return 100 + progress.healthLevel * 25
+}
+
+fn progress_checksum() u32 = {
+    val hash: mut u32 = 2166136261 as u32
+    hash = (hash ^ (progress.bestWave as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.xp as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.totalXp as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.shotgun as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.plasma as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.healthLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.damageLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.fireRateLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (progress.speedLevel as u32)) * 16777619 as u32
+    return hash
+}
+
+fn progress_reset() void = {
+    progress.magic = PROGRESS_MAGIC
+    progress.version = PROGRESS_VERSION
+    progress.checksum = 0
+    progress.bestWave = 0
+    progress.xp = 0
+    progress.totalXp = 0
+    progress.shotgun = 0
+    progress.plasma = 0
+    progress.healthLevel = 0
+    progress.damageLevel = 0
+    progress.fireRateLevel = 0
+    progress.speedLevel = 0
+}
+
+fn save_progress() bool = trust {
+    progress.magic = PROGRESS_MAGIC
+    progress.version = PROGRESS_VERSION
+    progress.checksum = progress_checksum()
+
+    val size: i32 = @sizeof(Progress) as i32
+    val raw: mut [64]u8 = @zeroed
+    @memcpy(raw as ref void, @addr(progress) as ref void, size as usize)
+    for i = 0, i < size, i++ {
+        val mixed: u32 = (i as u32) * 73 as u32 + PROGRESS_XOR
+        val key: u8 = (mixed & 255 as u32) as u8
+        val b: u8 = @load8(@ptradd(raw as ref u8, i as usize))
+        @store8(@ptradd(raw as ref u8, i as usize), b ^ key)
+    }
+    return fs.write_all_bytes(PROGRESS_PATH, raw as ref void, size as i64)
+}
+
+fn load_progress() void = trust {
+    progress_reset()
+
+    val size: mut i64 = 0
+    match fs.file_size(PROGRESS_PATH) {
+        none => {
+            return
+        }
+        some found => {
+            size = found
+        }
+    }
+    if size < (@sizeof(Progress) as i64) {
+        return
+    }
+
+    match fs.read_all_raw(PROGRESS_PATH) {
+        none => {
+            return
+        }
+        some data => {
+            val count: i32 = @sizeof(Progress) as i32
+            val raw: mut [64]u8 = @zeroed
+            @memcpy(raw as ref void, data as ref void, count as usize)
+            for i = 0, i < count, i++ {
+                val mixed: u32 = (i as u32) * 73 as u32 + PROGRESS_XOR
+                val key: u8 = (mixed & 255 as u32) as u8
+                val b: u8 = @load8(@ptradd(raw as ref u8, i as usize))
+                @store8(@ptradd(raw as ref u8, i as usize), b ^ key)
+            }
+            @memcpy(@addr(progress) as ref void, raw as ref void, count as usize)
+            @free(data as ref void)
+        }
+    }
+
+    if progress.magic != PROGRESS_MAGIC || progress.version != PROGRESS_VERSION || progress.checksum != progress_checksum() {
+        progress_reset()
+        return
+    }
+
+    if progress.bestWave < 0 {
+        progress.bestWave = 0
+    }
+    if progress.xp < 0 {
+        progress.xp = 0
+    }
+    if progress.healthLevel < 0 {
+        progress.healthLevel = 0
+    }
+    if progress.healthLevel > MAX_HEALTH_LEVEL {
+        progress.healthLevel = MAX_HEALTH_LEVEL
+    }
+    if progress.damageLevel < 0 {
+        progress.damageLevel = 0
+    }
+    if progress.damageLevel > MAX_DAMAGE_LEVEL {
+        progress.damageLevel = MAX_DAMAGE_LEVEL
+    }
+    if progress.fireRateLevel < 0 {
+        progress.fireRateLevel = 0
+    }
+    if progress.fireRateLevel > MAX_FIRE_RATE_LEVEL {
+        progress.fireRateLevel = MAX_FIRE_RATE_LEVEL
+    }
+    if progress.speedLevel < 0 {
+        progress.speedLevel = 0
+    }
+    if progress.speedLevel > MAX_SPEED_LEVEL {
+        progress.speedLevel = MAX_SPEED_LEVEL
+    }
+}
+
+fn weapon_unlocked(index: i32) bool = {
+    if index == WEAPON_MACHINE_GUN {
+        return true
+    }
+    if index == WEAPON_SHOTGUN {
+        return progress.shotgun != 0
+    }
+    if index == WEAPON_PLASMA {
+        return progress.plasma != 0
+    }
+    return false
+}
+
+fn weapon_name(index: i32) ref u8 = {
+    if index == WEAPON_SHOTGUN {
+        return "SHOTGUN"
+    }
+    if index == WEAPON_PLASMA {
+        return "PLASMA RIFLE"
+    }
+    return "MACHINE GUN"
+}
+
+fn weapon_shoot_sound(index: i32) ref void = {
+    if index == WEAPON_SHOTGUN {
+        return g_shootShotgunSound
+    }
+    if index == WEAPON_PLASMA {
+        return g_shootPlasmaSound
+    }
+    return g_shootSound
+}
+
+fn weapon_switch_sound(index: i32) ref void = {
+    if index == WEAPON_SHOTGUN {
+        return g_switchShotgunSound
+    }
+    if index == WEAPON_PLASMA {
+        return g_switchPlasmaSound
+    }
+    return g_switchMachineSound
+}
+
+fn weapon_cooldown(index: i32) f32 = {
+    val multiplier: mut f32 = 1.0 - (progress.fireRateLevel as f32) * 0.08
+    if multiplier < 0.60 {
+        multiplier = 0.60
+    }
+    if index == WEAPON_SHOTGUN {
+        return 0.88 * multiplier
+    }
+    if index == WEAPON_PLASMA {
+        return 0.26 * multiplier
+    }
+    return 0.13 * multiplier
+}
+
+fn switch_weapon(index: i32) void = {
+    if index < 0 || index > 2 {
+        return
+    }
+    if !weapon_unlocked(index) {
+        return
+    }
+    if index == currentWeapon && weaponEquip > 0.80 {
+        return
+    }
+    currentWeapon = index
+    weaponEquip = 0.0
+    shotgunReloadTimer = 0.0
+    shotgunReloadStage = 0
+    play_sound(weapon_switch_sound(index))
+}
+
+fn current_gun_texture() ref void = {
+    if currentWeapon == WEAPON_SHOTGUN {
+        if shotgunReloadStage == 1 {
+            return g_shotgunReload1Tex
+        }
+        if shotgunReloadStage == 2 {
+            return g_shotgunReload2Tex
+        }
+        return g_shotgunTex
+    }
+    if currentWeapon == WEAPON_PLASMA {
+        return g_plasmaTex
+    }
+    return g_machineGunTex
+}
+
+fn set_relative_mouse(enabled: bool) void = trust {
+    val want: mut i32 = 0
+    if enabled {
+        want = 1
+    }
+    if relativeMouseMode != want {
+        relativeMouseMode = want
+        SDL_SetRelativeMouseMode(want)
+    }
+}
+
+fn spawn_xp_orb(x: f32, y: f32, value: i32) void = {
+    for i = 0, i < MAX_XP_ORBS, i++ {
+        val orb: mut ref XpOrb = xp_orb_at(i)
+        if orb.active == 0 {
+            orb.x = x + (rand_unit() - 0.5) * 22.0
+            orb.y = y + (rand_unit() - 0.5) * 22.0
+            orb.value = value
+            orb.phase = rand_unit() * 2.0 * PI
+            orb.active = 1
+            return
+        }
+    }
+}
+
+fn drop_enemy_xp(x: f32, y: f32) void = {
+    val count: i32 = 2 + (rand_next() % 2) as i32
+    val value: i32 = 3 + wave
+    for i = 0, i < count, i++ {
+        spawn_xp_orb(x, y, value)
+    }
+}
+
+fn update_xp_orbs() void = {
+    val pCX: f32 = player.x + 4.0
+    val pCY: f32 = player.y + 4.0
+    for i = 0, i < MAX_XP_ORBS, i++ {
+        val orb: mut ref XpOrb = xp_orb_at(i)
+        if orb.active != 0 {
+            val dx: f32 = orb.x - pCX
+            val dy: f32 = orb.y - pCY
+            if dx * dx + dy * dy < 900.0 {
+                orb.active = 0
+                progress.xp += orb.value
+                progress.totalXp += orb.value
+                play_sound(g_xpSound)
+            }
+        }
+    }
+}
+
+fn draw_diamond_geo(
+    cx: i32,
+    cy: i32,
+    rx: i32,
+    ry: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    if rx < 1 || ry < 1 {
+        return
+    }
+    SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+
+    val top: mut ref SDL_Vertex = vertex_at(0)
+    top.position.x = cx as f32
+    top.position.y = (cy - ry) as f32
+    top.color.r = cr
+    top.color.g = cg
+    top.color.b = cb
+    top.color.a = ca
+    top.tex_coord.x = 0.0
+    top.tex_coord.y = 0.0
+
+    val right: mut ref SDL_Vertex = vertex_at(1)
+    right.position.x = (cx + rx) as f32
+    right.position.y = cy as f32
+    right.color.r = cr
+    right.color.g = cg
+    right.color.b = cb
+    right.color.a = ca
+    right.tex_coord.x = 0.0
+    right.tex_coord.y = 0.0
+
+    val bottom: mut ref SDL_Vertex = vertex_at(2)
+    bottom.position.x = cx as f32
+    bottom.position.y = (cy + ry) as f32
+    bottom.color.r = cr
+    bottom.color.g = cg
+    bottom.color.b = cb
+    bottom.color.a = ca
+    bottom.tex_coord.x = 0.0
+    bottom.tex_coord.y = 0.0
+
+    val left: mut ref SDL_Vertex = vertex_at(3)
+    left.position.x = (cx - rx) as f32
+    left.position.y = cy as f32
+    left.color.r = cr
+    left.color.g = cg
+    left.color.b = cb
+    left.color.a = ca
+    left.tex_coord.x = 0.0
+    left.tex_coord.y = 0.0
+
+    write_index(0, 0)
+    write_index(1, 1)
+    write_index(2, 2)
+    write_index(3, 0)
+    write_index(4, 2)
+    write_index(5, 3)
+    SDL_RenderGeometry(
+        g_renderer,
+        none as ref void,
+        g_vertices as ref SDL_Vertex,
+        4 as i32,
+        g_indices as ref i32,
+        6 as i32
+    )
+    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn draw_xp_symbol(cx: i32, cy: i32, size: i32, phase: f32) void = trust {
+    val radius: mut i32 = size
+    if radius < 3 {
+        radius = 3
+    }
+    if radius > 74 {
+        radius = 74
+    }
+    draw_glow(cx, cy, radius + 9, 255 as u8, 190 as u8, 54 as u8, 52 as u8)
+    val spin: f32 = 0.28 + 0.72 * fabsf(cosf(gameTime * 3.7 + phase))
+    val rx: i32 = ((radius as f32) * spin) as i32
+    if rx > 0 {
+        draw_diamond_geo(
+            cx,
+            cy,
+            rx,
+            radius,
+            255 as u8,
+            184 as u8,
+            36 as u8,
+            235 as u8
+        )
+        draw_diamond_geo(
+            cx,
+            cy,
+            rx * 55 / 100,
+            radius * 58 / 100,
+            255 as u8,
+            237 as u8,
+            148 as u8,
+            255 as u8
+        )
+    }
+    for spark = 0, spark < 4, spark++ {
+        val angle: f32 = gameTime * 2.4 + phase + (spark as f32) * (PI * 0.5)
+        val distance: f32 = (radius as f32) * 0.94
+        val sx: i32 = cx + (cosf(angle) * distance) as i32
+        val sy: i32 = cy + (sinf(angle) * distance) as i32
+        val twinkle: u8 = (110.0 + 145.0 * (0.5 + 0.5 * sinf(gameTime * 5.0 + phase + (spark as f32) * 1.7))) as u8
+        fill_circle(sx, sy, 2, 255 as u8, 236 as u8, 150 as u8, twinkle)
+    }
+}
+
+fn spawn_wave_enemy() bool = {
+    for i = 0, i < MAX_ENEMIES, i++ {
+        val enemy: mut ref Enemy = get_enemy(i)
+        if enemy.alive == 0 {
+            val spawnXVal: mut f32 = spawnX
+            val spawnYVal: mut f32 = spawnY
+            if enemySpawnCount > 0 {
+                val pick: i32 = (rand_next() % (enemySpawnCount as u32)) as i32
+                val spawn: ref SpawnPoint = enemy_spawn(pick)
+                spawnXVal = spawn.x
+                spawnYVal = spawn.y
+            } else {
+                val attempts: mut i32 = 0
+                for attempts < 200 {
+                    val cellX: i32 = (rand_next() % ((MAP_SIZE - 2) as u32)) as i32 + 1
+                    val cellY: i32 = (rand_next() % ((MAP_SIZE - 2) as u32)) as i32 + 1
+                    if map_at(cellX, cellY) == 0 {
+                        val testX: f32 = (cellX as f32) * (TILE_SIZE as f32) + 32.0
+                        val testY: f32 = (cellY as f32) * (TILE_SIZE as f32) + 32.0
+                        val dx: f32 = testX - (player.x + 4.0)
+                        val dy: f32 = testY - (player.y + 4.0)
+                        if dx * dx + dy * dy > 16000.0 {
+                            spawnXVal = testX
+                            spawnYVal = testY
+                            break
+                        }
+                    }
+                    attempts++
+                }
+            }
+            enemy.x = spawnXVal - 4.0
+            enemy.y = spawnYVal - 4.0
+            enemy.health = 3 + wave / 2 + wave / 5
+            enemy.alive = 1
+            enemy.shootTimer = 1.1 + rand_unit() * 1.6
+            waveSpawned++
+            return true
+        }
+    }
+    return false
+}
+
+fn start_wave() void = trust {
+    waveTarget = 4 + wave * 2
+    waveKilled = 0
+    waveSpawned = 0
+    waveIntermission = 0.0
+    for i = 0, i < MAX_ENEMIES, i++ {
+        get_enemy(i).alive = 0
+    }
+    if wave > 1 {
+        playerHealth += 15
+        if playerHealth > max_health() {
+            playerHealth = max_health()
+        }
+    }
+    if progress.bestWave < wave {
+        progress.bestWave = wave
+    }
+    save_progress()
+    play_sound(g_waveSound)
+
+    val initial: mut i32 = MAX_ENEMIES
+    if waveTarget < initial {
+        initial = waveTarget
+    }
+    for i = 0, i < initial, i++ {
+        spawn_wave_enemy()
+    }
+}
+
+fn start_game() void = trust {
+    gameState = STATE_PLAYING
+    set_relative_mouse(true)
+    playerHealth = max_health()
+    apply_spawn()
+    playerZ = 0.0
+    playerVZ = 0.0
+    onGround = true
+    wave = 1
+    waveIntermission = 0.0
+    currentWeapon = WEAPON_MACHINE_GUN
+    weaponEquip = 0.0
+    shotgunReloadTimer = 0.0
+    shotgunReloadStage = 0
+    for i = 0, i < MAX_BULLETS, i++ {
+        get_bullet(i).alive = 0
+    }
+    for i = 0, i < MAX_XP_ORBS, i++ {
+        xp_orb_at(i).active = 0
+    }
+    init_pickups()
+    play_sound(g_switchMachineSound)
+    start_wave()
+}
+
+fn on_enemy_killed(x: f32, y: f32) void = {
+    waveKilled++
+    drop_enemy_xp(x, y)
+    if waveKilled >= waveTarget {
+        waveIntermission = 3.0
+    }
+}
+
+fn update_wave(dt: f32) void = {
+    if waveIntermission > 0.0 {
+        waveIntermission -= dt
+        if waveIntermission <= 0.0 {
+            wave++
+            trust start_wave()
+        }
+        return
+    }
+
+    val alive: mut i32 = 0
+    for i = 0, i < MAX_ENEMIES, i++ {
+        if get_enemy(i).alive != 0 {
+            alive++
+        }
+    }
+    val remaining: i32 = waveTarget - waveSpawned
+    val slots: i32 = MAX_ENEMIES - alive
+    if remaining > 0 && slots > 0 {
+        val count: mut i32 = remaining
+        if slots < count {
+            count = slots
+        }
+        for i = 0, i < count, i++ {
+            spawn_wave_enemy()
+        }
+    }
+}
+
+fn shop_cost(item: i32) i32 = {
+    if item == 0 {
+        return 150
+    }
+    if item == 1 {
+        return 400
+    }
+    if item == 2 {
+        return 80 + progress.healthLevel * 60
+    }
+    if item == 3 {
+        return 120 + progress.damageLevel * 80
+    }
+    if item == 4 {
+        return 180 + progress.fireRateLevel * 120
+    }
+    if item == 5 {
+        return 140 + progress.speedLevel * 100
+    }
+    return 0
+}
+
+fn shop_maxed(item: i32) bool = {
+    if item == 2 {
+        return progress.healthLevel >= MAX_HEALTH_LEVEL
+    }
+    if item == 3 {
+        return progress.damageLevel >= MAX_DAMAGE_LEVEL
+    }
+    if item == 4 {
+        return progress.fireRateLevel >= MAX_FIRE_RATE_LEVEL
+    }
+    if item == 5 {
+        return progress.speedLevel >= MAX_SPEED_LEVEL
+    }
+    return false
+}
+
+fn shop_owned(item: i32) bool = {
+    if item == 0 {
+        return progress.shotgun != 0
+    }
+    if item == 1 {
+        return progress.plasma != 0
+    }
+    return false
+}
+
+fn try_buy(item: i32) void = trust {
+    if item < 0 || item > 5 {
+        return
+    }
+    if shop_owned(item) || item > 1 && shop_maxed(item) {
+        play_sound(g_clickSound)
+        return
+    }
+    val cost: i32 = shop_cost(item)
+    if progress.xp < cost {
+        play_sound(g_clickSound)
+        return
+    }
+    progress.xp -= cost
+    if item == 0 {
+        progress.shotgun = 1
+    } elif item == 1 {
+        progress.plasma = 1
+    } elif item == 2 {
+        progress.healthLevel++
+        playerHealth += 25
+        if playerHealth > max_health() {
+            playerHealth = max_health()
+        }
+    } elif item == 3 {
+        progress.damageLevel++
+    } elif item == 4 {
+        progress.fireRateLevel++
+    } elif item == 5 {
+        progress.speedLevel++
+    }
+    save_progress()
+    play_sound(g_buySound)
+}
+
+fn menu_play_x() i32 = {
+    return SCREEN_WIDTH / 2 - 190
+}
+
+fn menu_play_y() i32 = {
+    return 520
+}
+
+fn menu_exit_y() i32 = {
+    return 620
+}
+
+fn shop_row_x() i32 = {
+    return 260
+}
+
+fn shop_row_y(index: i32) i32 = {
+    return 250 + index * 98
+}
+
+fn shop_row_h() i32 = {
+    return 86
+}
+
+fn shop_row_w() i32 = {
+    return 760
+}
+
+fn update_menu() void = trust {
+    if inputClick {
+        if point_in(menu_play_x(), menu_play_y(), 380, 76, inputMouseX, inputMouseY) {
+            play_sound(g_clickSound)
+            start_game()
+            return
+        }
+        if point_in(menu_play_x(), menu_exit_y(), 380, 76, inputMouseX, inputMouseY) {
+            play_sound(g_clickSound)
+            quitRequested = true
+            return
+        }
+    }
+    if inputEnterPressed {
+        play_sound(g_clickSound)
+        start_game()
+        return
+    }
+    if inputEscapePressed {
+        quitRequested = true
+    }
+}
+
+fn update_shop() void = trust {
+    if inputEPressed || inputEscapePressed {
+        play_sound(g_clickSound)
+        gameState = STATE_PLAYING
+        set_relative_mouse(true)
+        return
+    }
+    if inputNum1 {
+        try_buy(0)
+    } elif inputNum2 {
+        try_buy(1)
+    } elif inputNum3 {
+        try_buy(2)
+    } elif inputNum4 {
+        try_buy(3)
+    } elif inputNum5 {
+        try_buy(4)
+    } elif inputNum6 {
+        try_buy(5)
+    }
+    if inputClick {
+        for i = 0, i < 6, i++ {
+            if point_in(
+                shop_row_x(),
+                shop_row_y(i),
+                shop_row_w(),
+                shop_row_h(),
+                inputMouseX,
+                inputMouseY
+            ) {
+                try_buy(i)
+                break
+            }
+        }
+    }
+}
+
+fn update_dead() void = trust {
+    if inputClick || inputEnterPressed || inputEPressed || inputEscapePressed {
+        play_sound(g_clickSound)
+        gameState = STATE_MENU
+        set_relative_mouse(false)
+    }
+}
+
+fn enter_death() void = trust {
+    gameState = STATE_DEAD
+    set_relative_mouse(false)
+    save_progress()
+    play_sound(g_deathSound)
+}
+
+fn render_menu() void = trust {
+    SDL_SetRenderDrawColor(g_renderer, 3 as u8, 4 as u8, 7 as u8, 255 as u8)
+    SDL_RenderClear(g_renderer)
+
+    for band = 0, band < 16, band++ {
+        val t: f32 = (band as f32) / 15.0
+        val cr: u8 = (5.0 + 10.0 * t) as u8
+        val cg: u8 = (6.0 + 13.0 * t) as u8
+        val cb: u8 = (14.0 + 24.0 * t) as u8
+        SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, 255 as u8)
+        g_aux_rect.x = 0
+        g_aux_rect.y = band * SCREEN_HEIGHT / 16
+        g_aux_rect.w = SCREEN_WIDTH
+        g_aux_rect.h = SCREEN_HEIGHT / 16 + 1
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+
+    for i = 0, i < 96, i++ {
+        val sx: i32 = (i * 173 + 37) % SCREEN_WIDTH
+        val sy: i32 = (i * 97 + 23) % 470
+        val twinkle: f32 = 0.35 + 0.65 * (0.5 + 0.5 * sinf(gameTime * 1.4 + (i as f32) * 0.7))
+        val bright: u8 = (70.0 + 150.0 * twinkle) as u8
+        SDL_SetRenderDrawColor(g_renderer, bright, bright, 255 as u8, 180 as u8)
+        g_aux_rect.x = sx
+        g_aux_rect.y = sy
+        g_aux_rect.w = 2
+        g_aux_rect.h = 2
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+
+    draw_glow(SCREEN_WIDTH / 2, 215, 220, 126 as u8, 255 as u8, 198 as u8, 42 as u8)
+    draw_text_centered(
+        SCREEN_WIDTH / 2 + 5,
+        170,
+        "CUBEDOOM",
+        12,
+        8 as u8,
+        10 as u8,
+        14 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        160,
+        "CUBEDOOM",
+        12,
+        246 as u8,
+        206 as u8,
+        84 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        300,
+        "ARENA SURVIVAL",
+        4,
+        96 as u8,
+        214 as u8,
+        255 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        370,
+        "KILL WAVES. COLLECT XP. BUY GEAR.",
+        2,
+        150 as u8,
+        163 as u8,
+        178 as u8,
+        255 as u8
+    )
+
+    val hoverPlay: bool = point_in(
+        menu_play_x(),
+        menu_play_y(),
+        380,
+        76,
+        uiMouseX,
+        uiMouseY
+    )
+    val hoverExit: bool = point_in(
+        menu_play_x(),
+        menu_exit_y(),
+        380,
+        76,
+        uiMouseX,
+        uiMouseY
+    )
+    draw_button(menu_play_x(), menu_play_y(), 380, 76, "PLAY GAME", hoverPlay)
+    draw_button(menu_play_x(), menu_exit_y(), 380, 76, "EXIT", hoverExit)
+
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        780,
+        "BEST WAVE",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    val bestWidth: i32 = text_width("BEST WAVE", 3)
+    draw_int(
+        SCREEN_WIDTH / 2 + bestWidth / 2 + 24,
+        780,
+        progress.bestWave,
+        3,
+        255 as u8,
+        236 as u8,
+        154 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        840,
+        "XP BANK",
+        2,
+        120 as u8,
+        132 as u8,
+        146 as u8,
+        255 as u8
+    )
+    val xpWidth: i32 = text_width("XP BANK", 2)
+    draw_int(
+        SCREEN_WIDTH / 2 + xpWidth / 2 + 18,
+        840,
+        progress.xp,
+        2,
+        255 as u8,
+        206 as u8,
+        92 as u8,
+        255 as u8
+    )
+}
+
+fn render_shop() void = trust {
+    SDL_SetRenderDrawColor(g_renderer, 4 as u8, 5 as u8, 8 as u8, 255 as u8)
+    SDL_RenderClear(g_renderer)
+
+    for band = 0, band < 12, band++ {
+        val t: f32 = (band as f32) / 11.0
+        val cr: u8 = (7.0 + 11.0 * t) as u8
+        val cg: u8 = (8.0 + 13.0 * t) as u8
+        val cb: u8 = (12.0 + 18.0 * t) as u8
+        SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, 255 as u8)
+        g_aux_rect.x = 0
+        g_aux_rect.y = band * SCREEN_HEIGHT / 12
+        g_aux_rect.w = SCREEN_WIDTH
+        g_aux_rect.h = SCREEN_HEIGHT / 12 + 1
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+
+    draw_panel(210, 80, 860, 800, 10 as u8, 13 as u8, 18 as u8, 238 as u8)
+    draw_border(210, 80, 860, 800, 3, 216 as u8, 166 as u8, 48 as u8, 255 as u8)
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        116,
+        "UPGRADES BOOTH",
+        6,
+        246 as u8,
+        206 as u8,
+        84 as u8,
+        255 as u8
+    )
+    draw_text(260, 190, "XP", 3, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw_int(320, 190, progress.xp, 3, 255 as u8, 236 as u8, 154 as u8, 255 as u8)
+
+    for i = 0, i < 6, i++ {
+        val rowX: i32 = shop_row_x()
+        val rowY: i32 = shop_row_y(i)
+        val hover: bool = point_in(rowX, rowY, shop_row_w(), shop_row_h(), uiMouseX, uiMouseY)
+        if hover {
+            draw_panel(
+                rowX - 4,
+                rowY - 4,
+                shop_row_w() + 8,
+                shop_row_h() + 8,
+                255 as u8,
+                190 as u8,
+                60 as u8,
+                48 as u8
+            )
+            draw_panel(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                36 as u8,
+                30 as u8,
+                18 as u8,
+                245 as u8
+            )
+            draw_border(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                2,
+                255 as u8,
+                205 as u8,
+                80 as u8,
+                255 as u8
+            )
+        } else {
+            draw_panel(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                18 as u8,
+                22 as u8,
+                29 as u8,
+                225 as u8
+            )
+            draw_border(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                1,
+                62 as u8,
+                78 as u8,
+                94 as u8,
+                255 as u8
+            )
+        }
+        draw_int(rowX + 24, rowY + 22, i + 1, 4, 255 as u8, 206 as u8, 84 as u8, 255 as u8)
+
+        val nameY: i32 = rowY + 16
+        val detailY: i32 = rowY + 52
+        if i == 0 {
+            draw_text(rowX + 90, nameY, "SHOTGUN", 4, 235 as u8, 240 as u8, 246 as u8, 255 as u8)
+            draw_text(
+                rowX + 90,
+                detailY,
+                "DOUBLE BARREL BLAST",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 1 {
+            draw_text(
+                rowX + 90,
+                nameY,
+                "PLASMA RIFLE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw_text(
+                rowX + 90,
+                detailY,
+                "HARD HITTING ENERGY BOLT",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 2 {
+            draw_text(
+                rowX + 90,
+                nameY,
+                "HEALTH UPGRADE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw_text(
+                rowX + 90,
+                detailY,
+                "MAX HEALTH +25",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 3 {
+            draw_text(
+                rowX + 90,
+                nameY,
+                "DAMAGE UPGRADE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw_text(
+                rowX + 90,
+                detailY,
+                "ALL WEAPONS HIT HARDER",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 4 {
+            draw_text(rowX + 90, nameY, "FIRE RATE", 4, 235 as u8, 240 as u8, 246 as u8, 255 as u8)
+            draw_text(
+                rowX + 90,
+                detailY,
+                "FASTER SHOOTING",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } else {
+            draw_text(rowX + 90, nameY, "MOVE SPEED", 4, 235 as u8, 240 as u8, 246 as u8, 255 as u8)
+            draw_text(
+                rowX + 90,
+                detailY,
+                "MOVE FASTER",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        }
+
+        if shop_owned(i) {
+            draw_text(rowX + 540, rowY + 30, "OWNED", 3, 96 as u8, 235 as u8, 140 as u8, 255 as u8)
+        } elif i > 1 && shop_maxed(i) {
+            draw_text(rowX + 556, rowY + 30, "MAX", 3, 255 as u8, 206 as u8, 92 as u8, 255 as u8)
+            draw_int(rowX + 590, rowY + 42, i - 1, 2, 140 as u8, 150 as u8, 160 as u8, 255 as u8)
+        } else {
+            val cost: i32 = shop_cost(i)
+            val affordable: bool = progress.xp >= cost
+            draw_text(rowX + 540, rowY + 30, "COST", 2, 150 as u8, 165 as u8, 180 as u8, 255 as u8)
+            if affordable {
+                draw_int(rowX + 592, rowY + 24, cost, 3, 255 as u8, 220 as u8, 120 as u8, 255 as u8)
+            } else {
+                draw_int(rowX + 592, rowY + 24, cost, 3, 226 as u8, 76 as u8, 76 as u8, 255 as u8)
+            }
+            draw_text(rowX + 548, rowY + 56, "XP", 2, 160 as u8, 150 as u8, 110 as u8, 255 as u8)
+            if i > 1 {
+                draw_text(
+                    rowX + 620,
+                    rowY + 56,
+                    "LV",
+                    2,
+                    140 as u8,
+                    150 as u8,
+                    160 as u8,
+                    255 as u8
+                )
+                val level: mut i32 = progress.healthLevel
+                if i == 3 {
+                    level = progress.damageLevel
+                } elif i == 4 {
+                    level = progress.fireRateLevel
+                } elif i == 5 {
+                    level = progress.speedLevel
+                }
+                draw_int(
+                    rowX + 646,
+                    rowY + 56,
+                    level,
+                    2,
+                    220 as u8,
+                    225 as u8,
+                    235 as u8,
+                    255 as u8
+                )
+            }
+        }
+    }
+
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        898,
+        "PRESS 1-6 OR CLICK TO BUY    E / ESC TO CLOSE",
+        2,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
+}
+
+fn render_dead() void = trust {
+    SDL_SetRenderDrawColor(g_renderer, 12 as u8, 2 as u8, 3 as u8, 255 as u8)
+    SDL_RenderClear(g_renderer)
+
+    for band = 0, band < 14, band++ {
+        val t: f32 = (band as f32) / 13.0
+        val cr: u8 = (22.0 - 14.0 * t) as u8
+        val cg: u8 = (3.0 + 4.0 * t) as u8
+        val cb: u8 = (5.0 + 5.0 * t) as u8
+        SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, 255 as u8)
+        g_aux_rect.x = 0
+        g_aux_rect.y = band * SCREEN_HEIGHT / 14
+        g_aux_rect.w = SCREEN_WIDTH
+        g_aux_rect.h = SCREEN_HEIGHT / 14 + 1
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+
+    draw_glow(SCREEN_WIDTH / 2, 340, 230, 210 as u8, 30 as u8, 30 as u8, 62 as u8)
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        300,
+        "YOU DIED",
+        11,
+        238 as u8,
+        52 as u8,
+        52 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        470,
+        "WAVE REACHED",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    draw_int(SCREEN_WIDTH / 2 - 20, 510, wave, 6, 255 as u8, 230 as u8, 150 as u8, 255 as u8)
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        620,
+        "BEST WAVE",
+        3,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
+    draw_int(
+        SCREEN_WIDTH / 2 - 32,
+        660,
+        progress.bestWave,
+        5,
+        220 as u8,
+        225 as u8,
+        235 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        790,
+        "CLICK OR PRESS ENTER TO RETURN TO MENU",
+        3,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
 }
 
 fn rotate_player(angle: f32) void = trust {
@@ -868,31 +2381,19 @@ fn apply_spawn() void = trust {
 fn init_enemies() void = trust {
     for i = 0, i < MAX_ENEMIES, i++ {
         val enemy: mut ref Enemy = get_enemy(i)
-        if i < enemySpawnCount {
-            val spawn: ref SpawnPoint = enemy_spawn(i)
-            enemy.x = spawn.x - 4.0
-            enemy.y = spawn.y - 4.0
-            enemy.health = 3
-            enemy.alive = 1
-            enemy.shootTimer = 1.5 + (i as f32) * 0.35
-        } else {
-            enemy.x = 0.0
-            enemy.y = 0.0
-            enemy.health = 0
-            enemy.alive = 0
-            enemy.shootTimer = 0.0
-        }
+        enemy.x = 0.0
+        enemy.y = 0.0
+        enemy.health = 0
+        enemy.alive = 0
+        enemy.shootTimer = 0.0
     }
 }
 
-fn player_shoot() void = {
-    if shootCooldown > 0.0 {
-        return
-    }
-    shootCooldown = SHOOT_COOLDOWN_VAL
-    muzzleFlashTimer = 0.14
-    play_sound(g_shootSound)
-
+fn spawn_player_bullet(angleOffset: f32, damage: i32, speed: f32) void = {
+    val cs: f32 = trust cosf(angleOffset)
+    val sn: f32 = trust sinf(angleOffset)
+    val dirX: f32 = player.dirX * cs - player.dirY * sn
+    val dirY: f32 = player.dirX * sn + player.dirY * cs
     val pCX: f32 = player.x + 4.0
     val pCY: f32 = player.y + 4.0
 
@@ -902,14 +2403,38 @@ fn player_shoot() void = {
         if blt.alive == 0 {
             blt.x = pCX
             blt.y = pCY
-            blt.dx = player.dirX * BULLET_SPEED
-            blt.dy = player.dirY * BULLET_SPEED
+            blt.dx = dirX * speed
+            blt.dy = dirY * speed
             blt.alive = 1
             blt.isPlayer = 1
             blt.animTime = 0.0
+            blt.damage = damage
+            blt.weapon = currentWeapon
             break
         }
         bi++
+    }
+}
+
+fn player_shoot() void = {
+    if shootCooldown > 0.0 || weaponEquip < 0.55 {
+        return
+    }
+    shootCooldown = weapon_cooldown(currentWeapon)
+    muzzleFlashTimer = 0.12
+    play_sound(weapon_shoot_sound(currentWeapon))
+
+    if currentWeapon == WEAPON_SHOTGUN {
+        for pellet = 0, pellet < 8, pellet++ {
+            val offset: f32 = ((pellet as f32) - 3.5) * 0.045
+            spawn_player_bullet(offset, 1 + progress.damageLevel, BULLET_SPEED * 1.05)
+        }
+        shotgunReloadTimer = 0.90
+        shotgunReloadStage = 0
+    } elif currentWeapon == WEAPON_PLASMA {
+        spawn_player_bullet(0.0, 2 + progress.damageLevel, BULLET_SPEED * 1.45)
+    } else {
+        spawn_player_bullet(0.0, 1 + progress.damageLevel, BULLET_SPEED * 1.15)
     }
 }
 
@@ -963,6 +2488,8 @@ fn update_enemies(dt: f32) void = {
                             blt.alive = 1
                             blt.isPlayer = 0
                             blt.animTime = 0.0
+                            blt.damage = 10
+                            blt.weapon = 9
                             play_sound(g_enemyShootSound)
                         }
                         break
@@ -1000,7 +2527,7 @@ fn update_bullets(dt: f32) void = {
                 val pdx: f32 = blt.x - pCX
                 val pdy: f32 = blt.y - pCY
                 if pdx * pdx + pdy * pdy < 400.0 {
-                    playerHealth -= 10
+                    playerHealth -= blt.damage
                     blt.alive = 0
                     if playerHealth < 0 {
                         playerHealth = 0
@@ -1017,9 +2544,10 @@ fn update_bullets(dt: f32) void = {
                         val edy: f32 = (e.y + 4.0) - blt.y
                         val edist: f32 = trust sqrtf(edx * edx + edy * edy)
                         if edist < 20.0 {
-                            e.health -= 1
+                            e.health -= blt.damage
                             if e.health <= 0 {
                                 e.alive = 0
+                                on_enemy_killed(e.x + 4.0, e.y + 4.0)
                             }
                             blt.alive = 0
                             play_sound(g_hitSound)
@@ -1043,6 +2571,9 @@ fn billboard_texture(kind: i32) ref void = {
     }
     if kind == 4 || kind == 5 {
         return g_bulletTex
+    }
+    if kind == 6 {
+        return g_boothTex
     }
     return g_enemyTex
 }
@@ -1069,6 +2600,11 @@ fn billboard_src(
         @deref(y) = 0
         @deref(w) = bulletTexW / 4
         @deref(h) = bulletTexH
+    } elif kind == 6 {
+        @deref(x) = 0
+        @deref(y) = 0
+        @deref(w) = boothTexW
+        @deref(h) = boothTexH
     } else {
         @deref(x) = 55
         @deref(y) = 40
@@ -1327,6 +2863,45 @@ fn init_pickups() void = {
     }
 }
 
+fn init_booth() void = {
+    boothFound = false
+    val spawnCellX: i32 = (spawnX / (TILE_SIZE as f32)) as i32
+    val spawnCellY: i32 = (spawnY / (TILE_SIZE as f32)) as i32
+
+    for radius = 2, radius < 12, radius++ {
+        for y = spawnCellY - radius, y <= spawnCellY + radius, y++ {
+            for x = spawnCellX - radius, x <= spawnCellX + radius, x++ {
+                val dx: i32 = x - spawnCellX
+                val dy: i32 = y - spawnCellY
+                val adx: mut i32 = dx
+                val ady: mut i32 = dy
+                if adx < 0 {
+                    adx = -adx
+                }
+                if ady < 0 {
+                    ady = -ady
+                }
+                if adx != radius && ady != radius {
+                    continue
+                }
+                if map_at(
+                    x,
+                    y
+                ) == 0 && !cell_has_enemy(x, y) && !cell_has_tree(x, y) && !cell_near_pickup(
+                    MAX_HEALTH_PICKUPS,
+                    x,
+                    y
+                ) {
+                    boothX = (x as f32) * (TILE_SIZE as f32) + 32.0
+                    boothY = (y as f32) * (TILE_SIZE as f32) + 32.0
+                    boothFound = true
+                    return
+                }
+            }
+        }
+    }
+}
+
 fn update_pickups(dt: f32) void = {
     val pCX: f32 = player.x + 4.0
     val pCY: f32 = player.y + 4.0
@@ -1338,8 +2913,8 @@ fn update_pickups(dt: f32) void = {
             val dy: f32 = pickup.y - pCY
             if dx * dx + dy * dy < 784.0 {
                 playerHealth += 25
-                if playerHealth > 100 {
-                    playerHealth = 100
+                if playerHealth > max_health() {
+                    playerHealth = max_health()
                 }
                 pickup.active = 0
                 pickup.respawn = 16.0
@@ -1375,7 +2950,7 @@ fn add_billboard(
 }
 
 fn render_billboards() void = trust {
-    val list: mut [64]Billboard = @zeroed
+    val list: mut [320]Billboard = @zeroed
     val count: mut i32 = 0
 
     for index = 0, index < MAX_ENEMIES, index++ {
@@ -1415,6 +2990,17 @@ fn render_billboards() void = trust {
         }
     }
 
+    if boothFound {
+        add_billboard(list as ref Billboard, @addr(count), 6, 0, boothX, boothY)
+    }
+
+    for index = 0, index < MAX_XP_ORBS, index++ {
+        val orb: ref XpOrb = xp_orb_at(index)
+        if orb.active != 0 {
+            add_billboard(list as ref Billboard, @addr(count), 7, index, orb.x, orb.y)
+        }
+    }
+
     for i = 0, i < count - 1, i++ {
         val farthest: mut i32 = i
         for j = i + 1, j < count, j++ {
@@ -1447,7 +3033,7 @@ fn render_billboards() void = trust {
         return
     }
     val invDet: f32 = 1.0 / det
-    val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch
+    val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch + playerZ
 
     for index = 0, index < count, index++ {
         val billboard: ref Billboard = billboard_at(list as ref Billboard, index)
@@ -1477,6 +3063,15 @@ fn render_billboards() void = trust {
             worldX = bullet.x
             worldY = bullet.y
             heightUnits = 0.12
+        } elif kind == 6 {
+            worldX = boothX
+            worldY = boothY
+            heightUnits = 1.35
+        } elif kind == 7 {
+            val orb: ref XpOrb = xp_orb_at(itemIndex)
+            worldX = orb.x
+            worldY = orb.y
+            heightUnits = 0.32
         }
 
         val dx: f32 = worldX - pCX
@@ -1488,6 +3083,21 @@ fn render_billboards() void = trust {
             val depth: f32 = ty / (TILE_SIZE as f32)
             val unit: f32 = (SCREEN_HEIGHT as f32) / depth
             val screenX: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
+
+            if kind == 7 {
+                val orb: ref XpOrb = xp_orb_at(itemIndex)
+                if screenX >= 0 && screenX < SCREEN_WIDTH {
+                    val zVal: usize = @load(@ptradd(zbuf, (screenX as usize) * 8)) as usize
+                    val orbDistance: usize = (depth * 100000.0) as usize
+                    if orbDistance < zVal {
+                        val bob: f32 = sinf(gameTime * 2.3 + orb.phase) * unit * 0.055
+                        val centerY: i32 = (horizon + unit * 0.52 + bob) as i32
+                        val symbolSize: i32 = (unit * 0.095) as i32 + 4
+                        draw_xp_symbol(screenX, centerY, symbolSize, orb.phase)
+                    }
+                }
+                continue
+            }
 
             val srcX: mut i32 = 0
             val srcY: mut i32 = 0
@@ -1545,6 +3155,31 @@ fn render_billboards() void = trust {
                     val texture: ref void = billboard_texture(kind)
 
                     if texture != none {
+                        if kind == 4 || kind == 5 {
+                            val bullet: ref Bullet = get_bullet(itemIndex)
+                            if bullet.weapon == 9 {
+                                SDL_SetTextureColorMod(texture, 255 as u8, 92 as u8, 82 as u8)
+                            } elif bullet.weapon == 2 {
+                                SDL_SetTextureColorMod(texture, 92 as u8, 224 as u8, 255 as u8)
+                            } elif bullet.weapon == 1 {
+                                SDL_SetTextureColorMod(texture, 255 as u8, 196 as u8, 110 as u8)
+                            } else {
+                                SDL_SetTextureColorMod(texture, 255 as u8, 236 as u8, 168 as u8)
+                            }
+                            if bullet.weapon == 2 && screenX >= 0 && screenX < SCREEN_WIDTH {
+                                draw_glow(
+                                    screenX,
+                                    (drawStartY + drawEndY) / 2,
+                                    16,
+                                    86 as u8,
+                                    220 as u8,
+                                    255 as u8,
+                                    58 as u8
+                                )
+                            }
+                        } else {
+                            SDL_SetTextureColorMod(texture, 255 as u8, 255 as u8, 255 as u8)
+                        }
                         val xi: mut i32 = drawStartX
                         for xi < drawEndX {
                             val zbufVal: usize = @load(@ptradd(zbuf, (xi as usize) * 8)) as usize
@@ -1568,6 +3203,9 @@ fn render_billboards() void = trust {
                                 }
                             }
                             xi++
+                        }
+                        if kind == 4 || kind == 5 {
+                            SDL_SetTextureColorMod(texture, 255 as u8, 255 as u8, 255 as u8)
                         }
                     }
                 }
@@ -1631,49 +3269,63 @@ fn render_billboards() void = trust {
     SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
 }
 
-fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = {
-    if g_gunTex == none {
+fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = trust {
+    val texture: ref void = current_gun_texture()
+    if texture == none {
         return
     }
 
     val gunW: i32 = SCREEN_WIDTH * 7 / 10
     val gunH: i32 = gunW * gunTexH / gunTexW
-    val gunX: i32 = (SCREEN_WIDTH - gunW) / 2 + bobX
-    val gunY: i32 = SCREEN_HEIGHT - gunH + bobY + 20
+    val equip: f32 = weaponEquip
+    val lift: i32 = ((1.0 - equip) * (gunH as f32) * 0.92) as i32
+    val sway: i32 = (sinf(gameTime * 8.0) * (1.0 - equip) * 34.0) as i32
+    val gunX: i32 = (SCREEN_WIDTH - gunW) / 2 + bobX + sway
+    val gunY: i32 = SCREEN_HEIGHT - gunH + bobY + 20 + lift
 
     g_dst_rect.x = gunX
     g_dst_rect.y = gunY
     g_dst_rect.w = gunW
     g_dst_rect.h = gunH
-    trust SDL_RenderCopy(g_renderer, g_gunTex, none, g_dst_rect as ref void)
+    SDL_RenderCopy(g_renderer, texture, none, g_dst_rect as ref void)
 
     if showFlash {
-        val flashSize: i32 = 120
+        val flashSize: i32 = 130
         val fX: i32 = gunX + gunW / 2 - flashSize / 2
         val fY: i32 = gunY - flashSize / 3
-        trust SDL_SetRenderDrawColor(g_renderer, 255 as u8, 220 as u8, 50 as u8, 255 as u8)
+        val fr: u8 = 255
+        val fg: mut u8 = 220
+        val fb: mut u8 = 50
+        if currentWeapon == WEAPON_SHOTGUN {
+            fg = 168
+            fb = 54
+        } elif currentWeapon == WEAPON_PLASMA {
+            fg = 210
+            fb = 255
+        }
+        SDL_SetRenderDrawColor(g_renderer, fr, fg, fb, 255 as u8)
         g_aux_rect.x = fX
         g_aux_rect.y = fY
         g_aux_rect.w = flashSize
         g_aux_rect.h = flashSize
-        trust SDL_RenderFillRect(g_renderer, g_aux_rect)
-        trust SDL_SetRenderDrawColor(g_renderer, 255 as u8, 255 as u8, 200 as u8, 255 as u8)
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+        SDL_SetRenderDrawColor(g_renderer, 255 as u8, 255 as u8, 220 as u8, 255 as u8)
         g_aux_rect.x = fX + flashSize / 4
         g_aux_rect.y = fY + flashSize / 4
         g_aux_rect.w = flashSize / 2
         g_aux_rect.h = flashSize / 2
-        trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
 
         draw_glow(
             fX + flashSize / 2,
             fY + flashSize / 2,
-            96,
-            255 as u8,
-            185 as u8,
-            65 as u8,
-            95 as u8
+            102,
+            fr,
+            fg,
+            fb,
+            105 as u8
         )
-        draw_flare_chain(fX + flashSize / 2, fY + flashSize / 2, 0.32)
+        draw_flare_chain(fX + flashSize / 2, fY + flashSize / 2, 0.36)
     }
 }
 
@@ -1814,15 +3466,15 @@ fn render_minimap() void = {
     trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
 }
 
-fn render_hud() void = {
-    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+fn render_hud() void = trust {
+    SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
 
-    trust SDL_SetRenderDrawColor(g_renderer, 8 as u8, 10 as u8, 14 as u8, 175 as u8)
+    SDL_SetRenderDrawColor(g_renderer, 8 as u8, 10 as u8, 14 as u8, 175 as u8)
     g_aux_rect.x = 24
     g_aux_rect.y = SCREEN_HEIGHT - 42
     g_aux_rect.w = 212
     g_aux_rect.h = 20
-    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    SDL_RenderFillRect(g_renderer, g_aux_rect)
 
     val healthR: mut u8 = 72
     val healthG: mut u8 = 225
@@ -1837,25 +3489,98 @@ fn render_hud() void = {
         healthB = 72
     }
 
-    trust SDL_SetRenderDrawColor(g_renderer, healthR, healthG, healthB, 235 as u8)
+    SDL_SetRenderDrawColor(g_renderer, healthR, healthG, healthB, 235 as u8)
     g_aux_rect.x = 29
     g_aux_rect.y = SCREEN_HEIGHT - 37
-    g_aux_rect.w = playerHealth * 202 / 100
+    g_aux_rect.w = playerHealth * 202 / max_health()
     g_aux_rect.h = 10
-    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    SDL_RenderFillRect(g_renderer, g_aux_rect)
 
     g_aux_rect.x = 15
     g_aux_rect.y = SCREEN_HEIGHT - 37
     g_aux_rect.w = 4
     g_aux_rect.h = 12
-    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    SDL_RenderFillRect(g_renderer, g_aux_rect)
     g_aux_rect.x = 11
     g_aux_rect.y = SCREEN_HEIGHT - 33
     g_aux_rect.w = 12
     g_aux_rect.h = 4
-    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    SDL_RenderFillRect(g_renderer, g_aux_rect)
 
-    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+
+    draw_text(28, 24, "WAVE", 3, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw_int(112, 20, wave, 4, 255 as u8, 236 as u8, 154 as u8, 255 as u8)
+    draw_text(28, 70, "LEFT", 2, 150 as u8, 165 as u8, 180 as u8, 255 as u8)
+    val left: mut i32 = waveTarget - waveKilled
+    if left < 0 {
+        left = 0
+    }
+    draw_int(84, 66, left, 3, 220 as u8, 228 as u8, 238 as u8, 255 as u8)
+    draw_text(28, 112, "XP", 2, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw_int(66, 106, progress.xp, 3, 255 as u8, 218 as u8, 110 as u8, 255 as u8)
+
+    val wname: ref u8 = weapon_name(currentWeapon)
+    val wnameWidth: i32 = text_width(wname, 3)
+    draw_text(
+        SCREEN_WIDTH - 28 - wnameWidth,
+        SCREEN_HEIGHT - 58,
+        wname,
+        3,
+        220 as u8,
+        228 as u8,
+        238 as u8,
+        255 as u8
+    )
+    draw_text(
+        SCREEN_WIDTH - 28 - text_width("1 2 3 SWITCH", 2),
+        SCREEN_HEIGHT - 92,
+        "1 2 3 SWITCH",
+        2,
+        120 as u8,
+        132 as u8,
+        146 as u8,
+        255 as u8
+    )
+
+    if boothFound {
+        val bdx: f32 = boothX - (player.x + 4.0)
+        val bdy: f32 = boothY - (player.y + 4.0)
+        if bdx * bdx + bdy * bdy < 12000.0 {
+            draw_glow(
+                SCREEN_WIDTH / 2,
+                SCREEN_HEIGHT - 170,
+                120,
+                255 as u8,
+                190 as u8,
+                64 as u8,
+                34 as u8
+            )
+            draw_text_centered(
+                SCREEN_WIDTH / 2,
+                SCREEN_HEIGHT - 184,
+                "PRESS E TO OPEN UPGRADES",
+                3,
+                255 as u8,
+                222 as u8,
+                128 as u8,
+                255 as u8
+            )
+        }
+    }
+
+    if waveIntermission > 0.0 {
+        draw_text_centered(
+            SCREEN_WIDTH / 2,
+            190,
+            "WAVE CLEARED",
+            6,
+            255 as u8,
+            214 as u8,
+            92 as u8,
+            255 as u8
+        )
+    }
 }
 
 fn load_texture(renderer: ref void, path: ref u8) ref void = trust {
@@ -2116,34 +3841,28 @@ pub fn main() i32 = {
         C.SDL_RENDERER_ACCELERATED | C.SDL_RENDERER_PRESENTVSYNC
     )
     g_renderer = renderer
-    trust SDL_SetRelativeMouseMode(1 as i32)
     trust SDL_SetHint("SDL_RENDER_SCALE_QUALITY", "1")
 
     trust Mix_OpenAudio(44100 as i32, C.AUDIO_S16SYS, 2 as i32, 1024 as i32)
-    g_shootSound = trust Mix_LoadWAV("sounds/shoot.wav")
-    g_enemyShootSound = trust Mix_LoadWAV("sounds/enemy_shoot.wav")
-    g_hitSound = trust Mix_LoadWAV("sounds/hit.wav")
-    g_hurtSound = trust Mix_LoadWAV("sounds/hurt.wav")
-    g_pickupSound = trust Mix_LoadWAV("sounds/pickup.wav")
-    g_footstepSound = trust Mix_LoadWAV("sounds/footstep.wav")
-    if g_shootSound != none {
-        trust Mix_VolumeChunk(g_shootSound, 55 as i32)
-    }
-    if g_enemyShootSound != none {
-        trust Mix_VolumeChunk(g_enemyShootSound, 32 as i32)
-    }
-    if g_hitSound != none {
-        trust Mix_VolumeChunk(g_hitSound, 48 as i32)
-    }
-    if g_hurtSound != none {
-        trust Mix_VolumeChunk(g_hurtSound, 78 as i32)
-    }
-    if g_pickupSound != none {
-        trust Mix_VolumeChunk(g_pickupSound, 62 as i32)
-    }
-    if g_footstepSound != none {
-        trust Mix_VolumeChunk(g_footstepSound, 26 as i32)
-    }
+    g_shootSound = trust load_sound("sounds/shoot_machinegun.wav", 55)
+    g_shootShotgunSound = trust load_sound("sounds/shoot_shotgun.wav", 70)
+    g_shootPlasmaSound = trust load_sound("sounds/shoot_plasma.wav", 56)
+    g_enemyShootSound = trust load_sound("sounds/enemy_shoot.wav", 32)
+    g_hitSound = trust load_sound("sounds/hit.wav", 48)
+    g_hurtSound = trust load_sound("sounds/hurt.wav", 78)
+    g_pickupSound = trust load_sound("sounds/pickup.wav", 62)
+    g_footstepSound = trust load_sound("sounds/footstep.wav", 26)
+    g_switchMachineSound = trust load_sound("sounds/weapon_machinegun.wav", 52)
+    g_switchShotgunSound = trust load_sound("sounds/weapon_shotgun.wav", 58)
+    g_switchPlasmaSound = trust load_sound("sounds/weapon_plasma.wav", 50)
+    g_reloadShotgun1Sound = trust load_sound("sounds/reload_shotgun_1.wav", 46)
+    g_reloadShotgun2Sound = trust load_sound("sounds/reload_shotgun_2.wav", 48)
+    g_jumpSound = trust load_sound("sounds/hup.wav", 58)
+    g_xpSound = trust load_sound("sounds/xp.wav", 46)
+    g_buySound = trust load_sound("sounds/buy.wav", 58)
+    g_clickSound = trust load_sound("sounds/click.wav", 38)
+    g_waveSound = trust load_sound("sounds/wave_start.wav", 56)
+    g_deathSound = trust load_sound("sounds/death.wav", 68)
 
     zbuf = @alloc((SCREEN_WIDTH as usize) * 8)
     trust @memset(zbuf, 127, (SCREEN_WIDTH as usize) * 8)
@@ -2173,12 +3892,16 @@ pub fn main() i32 = {
         enemyTexH = enemySize.h
     }
 
-    g_gunTex = trust load_texture(renderer, "sprites/centre_gun.png")
-    if g_gunTex != none {
-        val gunSize: TextureSize = trust texture_size(g_gunTex)
+    g_machineGunTex = trust load_texture(renderer, "sprites/guns/machine_gun.png")
+    if g_machineGunTex != none {
+        val gunSize: TextureSize = trust texture_size(g_machineGunTex)
         gunTexW = gunSize.w
         gunTexH = gunSize.h
     }
+    g_shotgunTex = trust load_texture(renderer, "sprites/guns/shotgun.png")
+    g_shotgunReload1Tex = trust load_texture(renderer, "sprites/guns/shotgun_reload_1.png")
+    g_shotgunReload2Tex = trust load_texture(renderer, "sprites/guns/shotgun_reload_2.png")
+    g_plasmaTex = trust load_texture(renderer, "sprites/guns/plasma_rifle.png")
 
     g_bulletTex = trust load_texture(renderer, "sprites/bullet.png")
     if g_bulletTex != none {
@@ -2189,64 +3912,113 @@ pub fn main() i32 = {
 
     g_treeTex = trust load_texture(renderer, "sprites/tree.png")
     g_healthTex = trust load_texture(renderer, "sprites/health.gif")
+    g_boothTex = trust load_texture(renderer, "sprites/booth.png")
+    if g_boothTex != none {
+        val boothSize: TextureSize = trust texture_size(g_boothTex)
+        boothTexW = boothSize.w
+        boothTexH = boothSize.h
+    }
 
     rng = trust SDL_GetTicks()
     init_sky()
     init_trees()
     init_pickups()
+    init_booth()
+    trust load_progress()
+    playerHealth = max_health()
+    gameState = STATE_MENU
+    trust set_relative_mouse(false)
 
-    val quit: mut bool = false
     val evt: ref SDL_Event = @alloc(@sizeof(SDL_Event))
     val lastTime: mut u32 = trust SDL_GetTicks()
 
     for {
-        if !quit {
-            val currentTime: u32 = trust SDL_GetTicks()
-            val deltaTime: f32 = ((currentTime - lastTime) as f32) / 1000.0
-            lastTime = currentTime
-            gameTime += deltaTime
+        val currentTime: u32 = trust SDL_GetTicks()
+        val deltaTime: mut f32 = ((currentTime - lastTime) as f32) / 1000.0
+        lastTime = currentTime
+        if deltaTime > 0.06 {
+            deltaTime = 0.06
+        }
+        gameTime += deltaTime
 
-            for {
-                if trust SDL_PollEvent(evt) != 0 {
-                    if evt.type_value == C.SDL_QUIT {
-                        quit = true
-                    }
-                } else {
-                    break
+        for {
+            if trust SDL_PollEvent(evt) != 0 {
+                if evt.type_value == C.SDL_QUIT {
+                    quitRequested = true
                 }
+            } else {
+                break
             }
+        }
+        if quitRequested {
+            break
+        }
 
-            val keys: ref u8 = trust SDL_GetKeyboardState(none as ref i32)
-            val keyA: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_A) * @sizeof(u8)))
-            val keyD: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_D) * @sizeof(u8)))
-            val keyW: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_W) * @sizeof(u8)))
-            val keyS: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_S) * @sizeof(u8)))
-            val keyShiftLeft: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_LSHIFT) * @sizeof(u8)))
-            val keyShiftRight: u8 = trust @load(@ptradd(
-                    keys,
-                    (C.SDL_SCANCODE_RSHIFT) * @sizeof(u8)
-                ))
-            val keyEscape: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_ESCAPE) * @sizeof(u8)))
+        val keys: ref u8 = trust SDL_GetKeyboardState(none as ref i32)
+        val keyA: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_A) * @sizeof(u8)))
+        val keyD: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_D) * @sizeof(u8)))
+        val keyW: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_W) * @sizeof(u8)))
+        val keyS: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_S) * @sizeof(u8)))
+        val keyShiftLeft: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_LSHIFT) * @sizeof(u8)))
+        val keyShiftRight: u8 = trust @load(@ptradd(
+                keys,
+                (C.SDL_SCANCODE_RSHIFT) * @sizeof(u8)
+            ))
+        val keyE: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_E) * @sizeof(u8)))
+        val keyEscape: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_ESCAPE) * @sizeof(u8)))
+        val keyEnter: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_RETURN) * @sizeof(u8)))
+        val keySpace: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_SPACE) * @sizeof(u8)))
+        val key1: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_1) * @sizeof(u8)))
+        val key2: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_2) * @sizeof(u8)))
+        val key3: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_3) * @sizeof(u8)))
+        val key4: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_4) * @sizeof(u8)))
+        val key5: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_5) * @sizeof(u8)))
+        val key6: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_6) * @sizeof(u8)))
 
-            if keyEscape != 0 {
-                quit = true
-            }
+        inputEPressed = keyE != 0 && prevE == 0
+        inputEscapePressed = keyEscape != 0 && prevEscape == 0
+        inputEnterPressed = keyEnter != 0 && prevEnter == 0
+        inputSpacePressed = keySpace != 0 && prevSpace == 0
+        inputNum1 = key1 != 0 && prevNum1 == 0
+        inputNum2 = key2 != 0 && prevNum2 == 0
+        inputNum3 = key3 != 0 && prevNum3 == 0
+        inputNum4 = key4 != 0 && prevNum4 == 0
+        inputNum5 = key5 != 0 && prevNum5 == 0
+        inputNum6 = key6 != 0 && prevNum6 == 0
+
+        val mouseScreenX: mut i32 = 0
+        val mouseScreenY: mut i32 = 0
+        val mouseButtons: u32 = trust SDL_GetMouseState(
+            @addr(mouseScreenX),
+            @addr(mouseScreenY)
+        )
+        val mouseDown: bool = (mouseButtons & (C.SDL_BUTTON_LMASK as u32)) != 0
+        inputMouseX = mouseScreenX
+        inputMouseY = mouseScreenY
+        uiMouseX = mouseScreenX
+        uiMouseY = mouseScreenY
+        inputClick = mouseDown && !prevMouseDown
+
+        if gameState == STATE_MENU {
+            trust set_relative_mouse(false)
+            trust update_menu()
+            trust render_menu()
+        } elif gameState == STATE_SHOP {
+            trust set_relative_mouse(false)
+            trust update_shop()
+            trust render_shop()
+        } elif gameState == STATE_DEAD {
+            trust set_relative_mouse(false)
+            trust update_dead()
+            trust render_dead()
+        } else {
+            trust set_relative_mouse(true)
 
             val mouseX: mut i32 = 0
             val mouseY: mut i32 = 0
             trust SDL_GetRelativeMouseState(@addr(mouseX), @addr(mouseY))
             if mouseX != 0 {
                 trust rotate_player((mouseX as f32) * 0.0022)
-            }
-
-            val mouseScreenX: mut i32 = 0
-            val mouseScreenY: mut i32 = 0
-            val mouseButtons: u32 = trust SDL_GetMouseState(
-                @addr(mouseScreenX),
-                @addr(mouseScreenY)
-            )
-            if (mouseButtons & (C.SDL_BUTTON_LMASK as u32)) != 0 {
-                player_shoot()
             }
             pitch = pitch - (mouseY as f32) * 1.1
             if pitch < -260.0 {
@@ -2256,221 +4028,321 @@ pub fn main() i32 = {
                 pitch = 260.0
             }
 
-            if shootCooldown > 0.0 {
-                shootCooldown -= deltaTime
-            }
-            if muzzleFlashTimer > 0.0 {
-                muzzleFlashTimer -= deltaTime
-            }
-            if hitFlashTimer > 0.0 {
-                hitFlashTimer -= deltaTime
-            }
+            val nearBooth: bool = boothFound && (boothX - (player.x + 4.0)) * (boothX - (player.x + 4.0)) + (boothY - (player.y + 4.0)) * (boothY - (player.y + 4.0)) < 12000.0
 
-            val sprinting: bool = keyShiftLeft != 0 || keyShiftRight != 0
-            val isMoving: bool = keyW != 0 || keyS != 0 || keyA != 0 || keyD != 0
-            val bobRate: mut f32 = 1.0
-            if sprinting {
-                bobRate = 1.35
-            }
-            if isMoving {
-                walkTime += deltaTime * bobRate
-                footstepTimer -= deltaTime
-                if footstepTimer <= 0.0 {
-                    play_sound(g_footstepSound)
-                    if sprinting {
-                        footstepTimer = 0.29
-                    } else {
-                        footstepTimer = 0.42
-                    }
-                }
+            if inputEPressed && nearBooth {
+                play_sound(g_clickSound)
+                gameState = STATE_SHOP
+                trust set_relative_mouse(false)
+                trust render_shop()
+            } elif inputEscapePressed {
+                trust save_progress()
+                gameState = STATE_MENU
+                trust set_relative_mouse(false)
+                trust render_menu()
             } else {
-                walkTime = 0.0
-                footstepTimer = 0.0
-            }
-            val bobY: i32 = (trust sinf(walkTime * 7.0) * 16.0) as i32
-            val bobX: i32 = (trust sinf(walkTime * 3.5) * 24.0) as i32
-
-            val movementSpeed: mut f32 = player.speed
-            if sprinting {
-                movementSpeed = player.speed * SPRINT_MULTIPLIER
-            }
-
-            if keyW != 0 || keyS != 0 {
-                val moveDir: mut f32 = -1.0
-                if keyW != 0 {
-                    moveDir = 1.0
+                if inputNum1 {
+                    switch_weapon(WEAPON_MACHINE_GUN)
+                } elif inputNum2 {
+                    switch_weapon(WEAPON_SHOTGUN)
+                } elif inputNum3 {
+                    switch_weapon(WEAPON_PLASMA)
                 }
 
-                val stepX: f32 = player.dirX * movementSpeed * moveDir * deltaTime
-                val stepY: f32 = player.dirY * movementSpeed * moveDir * deltaTime
-                try_move_player(stepX, stepY)
-            }
-
-            if keyA != 0 || keyD != 0 {
-                val strafeDir: mut f32 = 1.0
-                if keyA != 0 {
-                    strafeDir = -1.0
+                if inputSpacePressed && onGround {
+                    playerVZ = 330.0
+                    onGround = false
+                    play_sound(g_jumpSound)
                 }
 
-                val stepX: f32 = -player.dirY * movementSpeed * strafeDir * deltaTime
-                val stepY: f32 = player.dirX * movementSpeed * strafeDir * deltaTime
-                try_move_player(stepX, stepY)
-            }
-
-            update_enemies(deltaTime)
-            update_bullets(deltaTime)
-            update_pickups(deltaTime)
-
-            trust SDL_SetRenderDrawColor(renderer, 0 as u8, 0 as u8, 0 as u8, 255 as u8)
-            trust SDL_RenderClear(renderer)
-
-            val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch
-            draw_sky(horizon, gameTime)
-            draw_ground(horizon)
-
-            val pCX: f32 = player.x + 4.0
-            val pCY: f32 = player.y + 4.0
-            val span: mut WallSpan = @zeroed
-
-            val i: mut i32 = 0
-            for i < SCREEN_WIDTH {
-                val cameraX: f32 = 2.0 * (i as f32) / (SCREEN_WIDTH as f32) - 1.0
-                val rayDX: f32 = player.dirX + player.planeX * cameraX
-                val rayDY: f32 = player.dirY + player.planeY * cameraX
-
-                val mX: mut i32 = (pCX / (TILE_SIZE as f32)) as i32
-                val mY: mut i32 = (pCY / (TILE_SIZE as f32)) as i32
-
-                val dDX: mut f32 = trust fabsf(1.0 / rayDX)
-                if rayDX == 0.0 {
-                    dDX = 1e30
+                if mouseDown {
+                    player_shoot()
                 }
 
-                val dDY: mut f32 = trust fabsf(1.0 / rayDY)
-                if rayDY == 0.0 {
-                    dDY = 1e30
+                if shootCooldown > 0.0 {
+                    shootCooldown -= deltaTime
+                }
+                if muzzleFlashTimer > 0.0 {
+                    muzzleFlashTimer -= deltaTime
+                }
+                if hitFlashTimer > 0.0 {
+                    hitFlashTimer -= deltaTime
                 }
 
-                val sDX: mut f32 = 0.0
-                val sDY: mut f32 = 0.0
-                val stepX: mut i32 = 0
-                val stepY: mut i32 = 0
-
-                if rayDX < 0.0 {
-                    stepX = -1
-                    sDX = (pCX / (TILE_SIZE as f32) - (mX as f32)) * dDX
-                } else {
-                    stepX = 1
-                    sDX = ((mX as f32) + 1.0 - pCX / (TILE_SIZE as f32)) * dDX
-                }
-
-                if rayDY < 0.0 {
-                    stepY = -1
-                    sDY = (pCY / (TILE_SIZE as f32) - (mY as f32)) * dDY
-                } else {
-                    stepY = 1
-                    sDY = ((mY as f32) + 1.0 - pCY / (TILE_SIZE as f32)) * dDY
-                }
-
-                val hit: mut i32 = 0
-                val side: mut i32 = 0
-
-                for {
-                    if hit == 0 {
-                        if sDX < sDY {
-                            sDX += dDX
-                            mX += stepX
-                            side = 0
-                        } else {
-                            sDY += dDY
-                            mY += stepY
-                            side = 1
-                        }
-
-                        if mX < 0 || mX >= MAP_SIZE || mY < 0 || mY >= MAP_SIZE {
-                            break
-                        }
-                        if map_at(mX, mY) > 0 {
-                            hit = 1
-                        }
-                    } else {
-                        break
+                if weaponEquip < 1.0 {
+                    weaponEquip += deltaTime / 0.34
+                    if weaponEquip > 1.0 {
+                        weaponEquip = 1.0
                     }
                 }
 
-                val pWD: mut f32 = sDY - dDY
-                if side == 0 {
-                    pWD = sDX - dDX
-                }
-                if pWD < 0.1 {
-                    pWD = 0.1
-                }
-
-                trust @store(@ptradd(zbuf, (i as usize) * 8), (pWD * 100000.0) as usize)
-
-                val unitH: f32 = (SCREEN_HEIGHT as f32) / pWD
-                val wallH: f32 = unitH * (WALL_UNITS / (TILE_SIZE as f32))
-                val wallTop: f32 = horizon - wallH * 0.5
-                val intensity: f32 = 0.42 + 0.58 / (1.0 + pWD * pWD * 0.02)
-                val r: mut u8 = (255.0 * intensity) as u8
-                if side == 1 {
-                    r = ((r as f32) * 0.7) as u8
-                }
-
-                val hitX: f32 = pCX + rayDX * pWD * (TILE_SIZE as f32)
-                val hitY: f32 = pCY + rayDY * pWD * (TILE_SIZE as f32)
-
-                val wallPos: mut f32 = hitY / (TILE_SIZE as f32) - (mY as f32)
-                if side == 1 {
-                    wallPos = hitX / (TILE_SIZE as f32) - (mX as f32)
-                }
-                wallPos = wallPos - (wallPos as i32) as f32
-                if wallPos < 0.0 {
-                    wallPos += 1.0
+                if shotgunReloadTimer > 0.0 {
+                    shotgunReloadTimer -= deltaTime
+                    val stage: mut i32 = 0
+                    if shotgunReloadTimer > 0.55 {
+                        stage = 0
+                    } elif shotgunReloadTimer > 0.35 {
+                        stage = 1
+                    } elif shotgunReloadTimer > 0.15 {
+                        stage = 2
+                    }
+                    if stage != shotgunReloadStage {
+                        if stage == 1 {
+                            play_sound(g_reloadShotgun1Sound)
+                        } elif stage == 2 {
+                            play_sound(g_reloadShotgun2Sound)
+                        }
+                        shotgunReloadStage = stage
+                    }
+                    if shotgunReloadTimer <= 0.0 {
+                        shotgunReloadTimer = 0.0
+                        shotgunReloadStage = 0
+                    }
                 }
 
-                val faceSign: mut i32 = stepY
-                if side == 0 {
-                    faceSign = stepX
+                if !onGround {
+                    playerVZ -= 1050.0 * deltaTime
+                    playerZ += playerVZ * deltaTime
+                    if playerZ <= 0.0 {
+                        playerZ = 0.0
+                        playerVZ = 0.0
+                        onGround = true
+                    }
                 }
-                val sameWall: bool = span.active != 0 && span.cell_x == mX && span.cell_y == mY && span.side == side && span.face_sign == faceSign
-                if !sameWall {
+
+                val sprinting: bool = keyShiftLeft != 0 || keyShiftRight != 0
+                val isMoving: bool = keyW != 0 || keyS != 0 || keyA != 0 || keyD != 0
+                val bobRate: mut f32 = 1.0
+                if sprinting {
+                    bobRate = 1.35
+                }
+                if isMoving {
+                    walkTime += deltaTime * bobRate
+                    footstepTimer -= deltaTime
+                    if footstepTimer <= 0.0 {
+                        play_sound(g_footstepSound)
+                        if sprinting {
+                            footstepTimer = 0.29
+                        } else {
+                            footstepTimer = 0.42
+                        }
+                    }
+                } else {
+                    walkTime = 0.0
+                    footstepTimer = 0.0
+                }
+                val bobY: i32 = (trust sinf(walkTime * 7.0) * 16.0) as i32
+                val bobX: i32 = (trust sinf(walkTime * 3.5) * 24.0) as i32
+
+                val speedBonus: f32 = 1.0 + (progress.speedLevel as f32) * 0.08
+                val movementSpeed: mut f32 = player.speed * speedBonus
+                if sprinting {
+                    movementSpeed = player.speed * speedBonus * SPRINT_MULTIPLIER
+                }
+
+                if keyW != 0 || keyS != 0 {
+                    val moveDir: mut f32 = -1.0
+                    if keyW != 0 {
+                        moveDir = 1.0
+                    }
+
+                    val stepX: f32 = player.dirX * movementSpeed * moveDir * deltaTime
+                    val stepY: f32 = player.dirY * movementSpeed * moveDir * deltaTime
+                    try_move_player(stepX, stepY)
+                }
+
+                if keyA != 0 || keyD != 0 {
+                    val strafeDir: mut f32 = 1.0
+                    if keyA != 0 {
+                        strafeDir = -1.0
+                    }
+
+                    val stepX: f32 = -player.dirY * movementSpeed * strafeDir * deltaTime
+                    val stepY: f32 = player.dirX * movementSpeed * strafeDir * deltaTime
+                    try_move_player(stepX, stepY)
+                }
+
+                update_enemies(deltaTime)
+                update_bullets(deltaTime)
+                update_pickups(deltaTime)
+                update_xp_orbs()
+                update_wave(deltaTime)
+
+                if playerHealth <= 0 {
+                    trust enter_death()
+                    trust render_dead()
+                } else {
+                    trust SDL_SetRenderDrawColor(renderer, 0 as u8, 0 as u8, 0 as u8, 255 as u8)
+                    trust SDL_RenderClear(renderer)
+
+                    val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch + playerZ
+                    draw_sky(horizon, gameTime)
+                    draw_ground(horizon)
+
+                    val pCX: f32 = player.x + 4.0
+                    val pCY: f32 = player.y + 4.0
+                    val span: mut WallSpan = @zeroed
+
+                    val i: mut i32 = 0
+                    for i < SCREEN_WIDTH {
+                        val cameraX: f32 = 2.0 * (i as f32) / (SCREEN_WIDTH as f32) - 1.0
+                        val rayDX: f32 = player.dirX + player.planeX * cameraX
+                        val rayDY: f32 = player.dirY + player.planeY * cameraX
+
+                        val mX: mut i32 = (pCX / (TILE_SIZE as f32)) as i32
+                        val mY: mut i32 = (pCY / (TILE_SIZE as f32)) as i32
+
+                        val dDX: mut f32 = trust fabsf(1.0 / rayDX)
+                        if rayDX == 0.0 {
+                            dDX = 1e30
+                        }
+
+                        val dDY: mut f32 = trust fabsf(1.0 / rayDY)
+                        if rayDY == 0.0 {
+                            dDY = 1e30
+                        }
+
+                        val sDX: mut f32 = 0.0
+                        val sDY: mut f32 = 0.0
+                        val stepX: mut i32 = 0
+                        val stepY: mut i32 = 0
+
+                        if rayDX < 0.0 {
+                            stepX = -1
+                            sDX = (pCX / (TILE_SIZE as f32) - (mX as f32)) * dDX
+                        } else {
+                            stepX = 1
+                            sDX = ((mX as f32) + 1.0 - pCX / (TILE_SIZE as f32)) * dDX
+                        }
+
+                        if rayDY < 0.0 {
+                            stepY = -1
+                            sDY = (pCY / (TILE_SIZE as f32) - (mY as f32)) * dDY
+                        } else {
+                            stepY = 1
+                            sDY = ((mY as f32) + 1.0 - pCY / (TILE_SIZE as f32)) * dDY
+                        }
+
+                        val hit: mut i32 = 0
+                        val side: mut i32 = 0
+
+                        for {
+                            if hit == 0 {
+                                if sDX < sDY {
+                                    sDX += dDX
+                                    mX += stepX
+                                    side = 0
+                                } else {
+                                    sDY += dDY
+                                    mY += stepY
+                                    side = 1
+                                }
+
+                                if mX < 0 || mX >= MAP_SIZE || mY < 0 || mY >= MAP_SIZE {
+                                    break
+                                }
+                                if map_at(mX, mY) > 0 {
+                                    hit = 1
+                                }
+                            } else {
+                                break
+                            }
+                        }
+
+                        val pWD: mut f32 = sDY - dDY
+                        if side == 0 {
+                            pWD = sDX - dDX
+                        }
+                        if pWD < 0.1 {
+                            pWD = 0.1
+                        }
+
+                        trust @store(@ptradd(zbuf, (i as usize) * 8), (pWD * 100000.0) as usize)
+
+                        val unitH: f32 = (SCREEN_HEIGHT as f32) / pWD
+                        val wallH: f32 = unitH * (WALL_UNITS / (TILE_SIZE as f32))
+                        val wallTop: f32 = horizon - wallH * 0.5
+                        val intensity: f32 = 0.42 + 0.58 / (1.0 + pWD * pWD * 0.02)
+                        val r: mut u8 = (255.0 * intensity) as u8
+                        if side == 1 {
+                            r = ((r as f32) * 0.7) as u8
+                        }
+
+                        val hitX: f32 = pCX + rayDX * pWD * (TILE_SIZE as f32)
+                        val hitY: f32 = pCY + rayDY * pWD * (TILE_SIZE as f32)
+
+                        val wallPos: mut f32 = hitY / (TILE_SIZE as f32) - (mY as f32)
+                        if side == 1 {
+                            wallPos = hitX / (TILE_SIZE as f32) - (mX as f32)
+                        }
+                        wallPos = wallPos - (wallPos as i32) as f32
+                        if wallPos < 0.0 {
+                            wallPos += 1.0
+                        }
+
+                        val faceSign: mut i32 = stepY
+                        if side == 0 {
+                            faceSign = stepX
+                        }
+                        val sameWall: bool = span.active != 0 && span.cell_x == mX && span.cell_y == mY && span.side == side && span.face_sign == faceSign
+                        if !sameWall {
+                            trust wall_span_flush(@addr(span))
+                            span.active = 1
+                            span.start_x = i
+                            span.cell_x = mX
+                            span.cell_y = mY
+                            span.side = side
+                            span.face_sign = faceSign
+                        }
+                        span.end_x = i
+
+                        val column: mut ref ColumnInfo = column_info(i)
+                        column.top = wallTop
+                        column.bottom = wallTop + wallH
+                        column.tex = wallPos
+                        column.shade = r
+
+                        i++
+                    }
+
                     trust wall_span_flush(@addr(span))
-                    span.active = 1
-                    span.start_x = i
-                    span.cell_x = mX
-                    span.cell_y = mY
-                    span.side = side
-                    span.face_sign = faceSign
+                    trust render_billboards()
+                    trust render_gun(bobX, bobY, muzzleFlashTimer > 0.0)
+                    render_crosshair()
+                    render_damage()
+                    trust render_hud()
+                    render_minimap()
                 }
-                span.end_x = i
-
-                val column: mut ref ColumnInfo = column_info(i)
-                column.top = wallTop
-                column.bottom = wallTop + wallH
-                column.tex = wallPos
-                column.shade = r
-
-                i++
             }
+        }
 
-            trust wall_span_flush(@addr(span))
-            trust render_billboards()
-            render_gun(bobX, bobY, muzzleFlashTimer > 0.0)
-            render_crosshair()
-            render_damage()
-            render_hud()
-            render_minimap()
-            trust SDL_RenderPresent(renderer)
+        prevE = keyE
+        prevEscape = keyEscape
+        prevEnter = keyEnter
+        prevSpace = keySpace
+        prevNum1 = key1
+        prevNum2 = key2
+        prevNum3 = key3
+        prevNum4 = key4
+        prevNum5 = key5
+        prevNum6 = key6
+        prevMouseDown = mouseDown
 
-        } else {
+        trust SDL_RenderPresent(renderer)
+        if quitRequested {
             break
         }
     }
 
-    trust SDL_SetRelativeMouseMode(0 as i32)
+    trust set_relative_mouse(false)
     if g_shootSound != none {
         trust Mix_FreeChunk(g_shootSound)
+    }
+    if g_shootShotgunSound != none {
+        trust Mix_FreeChunk(g_shootShotgunSound)
+    }
+    if g_shootPlasmaSound != none {
+        trust Mix_FreeChunk(g_shootPlasmaSound)
     }
     if g_enemyShootSound != none {
         trust Mix_FreeChunk(g_enemyShootSound)
@@ -2486,6 +4358,39 @@ pub fn main() i32 = {
     }
     if g_footstepSound != none {
         trust Mix_FreeChunk(g_footstepSound)
+    }
+    if g_switchMachineSound != none {
+        trust Mix_FreeChunk(g_switchMachineSound)
+    }
+    if g_switchShotgunSound != none {
+        trust Mix_FreeChunk(g_switchShotgunSound)
+    }
+    if g_switchPlasmaSound != none {
+        trust Mix_FreeChunk(g_switchPlasmaSound)
+    }
+    if g_reloadShotgun1Sound != none {
+        trust Mix_FreeChunk(g_reloadShotgun1Sound)
+    }
+    if g_reloadShotgun2Sound != none {
+        trust Mix_FreeChunk(g_reloadShotgun2Sound)
+    }
+    if g_jumpSound != none {
+        trust Mix_FreeChunk(g_jumpSound)
+    }
+    if g_xpSound != none {
+        trust Mix_FreeChunk(g_xpSound)
+    }
+    if g_buySound != none {
+        trust Mix_FreeChunk(g_buySound)
+    }
+    if g_clickSound != none {
+        trust Mix_FreeChunk(g_clickSound)
+    }
+    if g_waveSound != none {
+        trust Mix_FreeChunk(g_waveSound)
+    }
+    if g_deathSound != none {
+        trust Mix_FreeChunk(g_deathSound)
     }
     trust Mix_CloseAudio()
     trust SDL_DestroyRenderer(renderer)
