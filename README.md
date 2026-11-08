@@ -1,6 +1,6 @@
 ## cubedoom
 
-This is a lightweight arena shooter, consisting of under 1000 LOC, and raycasting rendering.
+This is a lightweight arena shooter, initially consisting of under 1000 LOC, and raycasting rendering.
 
 To build, clone this repository, and install:
 
