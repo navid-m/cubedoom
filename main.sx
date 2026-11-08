@@ -1,20 +1,20 @@
-val audio = use("core/audio.sx")
-val combat = use("game/combat.sx")
-val constants = use("core/constants.sx")
-val dead = use("ui/dead.sx")
-val entities = use("world/entities.sx")
-val hud = use("render/hud.sx")
-val mapmod = use("world/map.sx")
-val menu = use("ui/menu.sx")
-val movement = use("game/player.sx")
-val pause = use("ui/pause.sx")
-val platform = use("core/platform.sx")
+val audio       = use("core/audio.sx")
+val combat      = use("game/combat.sx")
+val constants   = use("core/constants.sx")
+val dead        = use("ui/dead.sx")
+val entities    = use("world/entities.sx")
+val hud         = use("render/hud.sx")
+val mapmod      = use("world/map.sx")
+val menu        = use("ui/menu.sx")
+val movement    = use("game/player.sx")
+val pause       = use("ui/pause.sx")
+val platform    = use("core/platform.sx")
 val progression = use("core/progression.sx")
-val sdl = use("core/sdl.sx")
-val shopui = use("ui/shop.sx")
-val sky = use("render/sky.sx")
-val state = use("core/state.sx")
-val weapons = use("game/weapons.sx")
+val sdl         = use("core/sdl.sx")
+val shopui      = use("ui/shop.sx")
+val sky         = use("render/sky.sx")
+val state       = use("core/state.sx")
+val weapons     = use("game/weapons.sx")
 val worldrender = use("render/world.sx")
 
 pub fn main() i32 = {
@@ -100,8 +100,14 @@ pub fn main() i32 = {
         st.gunTexH = gunSize.h
     }
     st.g_shotgunTex = trust worldrender.load_texture(renderer, "sprites/guns/shotgun.png")
-    st.g_shotgunReload1Tex = trust worldrender.load_texture(renderer, "sprites/guns/shotgun_reload_1.png")
-    st.g_shotgunReload2Tex = trust worldrender.load_texture(renderer, "sprites/guns/shotgun_reload_2.png")
+    st.g_shotgunReload1Tex = trust worldrender.load_texture(
+        renderer,
+        "sprites/guns/shotgun_reload_1.png"
+    )
+    st.g_shotgunReload2Tex = trust worldrender.load_texture(
+        renderer,
+        "sprites/guns/shotgun_reload_2.png"
+    )
     st.g_plasmaTex = trust worldrender.load_texture(renderer, "sprites/guns/plasma_rifle.png")
 
     st.g_bulletTex = trust worldrender.load_texture(renderer, "sprites/bullet.png")
