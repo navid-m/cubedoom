@@ -41,6 +41,7 @@ val STATE_MENU: i32 = 0
 val STATE_PLAYING: i32 = 1
 val STATE_SHOP: i32 = 2
 val STATE_DEAD: i32 = 3
+val STATE_PAUSED: i32 = 4
 val WEAPON_MACHINE_GUN: i32 = 0
 val WEAPON_SHOTGUN: i32 = 1
 val WEAPON_PLASMA: i32 = 2
@@ -77,6 +78,21 @@ extern type SDL_Vertex = {
     position: mut SDL_FPoint
     color: mut SDL_Color
     tex_coord: mut SDL_FPoint
+}
+
+extern type SDL_Surface = {
+    flags: mut u32
+    format: mut ref void
+    w: mut i32
+    h: mut i32
+    pitch: mut i32
+    pixels: mut ref void
+    userdata: mut ref void
+    locked: mut i32
+    list_blitmap: mut ref void
+    clip_rect: mut SDL_Rect
+    map: mut ref void
+    refcount: mut i32
 }
 
 extern type Player = {
@@ -276,6 +292,23 @@ extern (C, header) fn SDL_QueryTexture(
     h: ref void
 ) i32 = "SDL_QueryTexture"
 extern (C, header) fn IMG_Load(file: ref u8) ref void = "IMG_Load"
+extern (C, header) fn IMG_SavePNG(surface: ref void, file: ref u8) i32 = "IMG_SavePNG"
+extern (C, header) fn SDL_CreateRGBSurfaceWithFormat(
+    flags: u32,
+    width: i32,
+    height: i32,
+    depth: i32,
+    format: u32
+) ref void = "SDL_CreateRGBSurfaceWithFormat"
+extern (C, header) fn SDL_RenderReadPixels(
+    renderer: ref void,
+    rect: ref void,
+    format: u32,
+    pixels: ref void,
+    pitch: i32
+) i32 = "SDL_RenderReadPixels"
+extern (C, header) fn SDL_GetBasePath() ref u8 = "SDL_GetBasePath"
+extern (C, header) fn SDL_free(ptr: ref void) void = "SDL_free"
 extern (C, header) fn SDL_SetRenderDrawBlendMode(
     renderer: ref void,
     blendMode: i32
@@ -367,6 +400,7 @@ val rng: mut u32 = 0x9E3779B9
 val pitch: mut f32 = 0.0
 val footstepTimer: mut f32 = 0.0
 val gameTime: mut f32 = 0.0
+val screenshotCounter: mut i32 = 0
 val g_shootSound: mut ref void = none
 val g_enemyShootSound: mut ref void = none
 val g_hitSound: mut ref void = none
@@ -425,6 +459,7 @@ val inputEPressed: mut bool = false
 val inputEscapePressed: mut bool = false
 val inputEnterPressed: mut bool = false
 val inputSpacePressed: mut bool = false
+val inputF12Pressed: mut bool = false
 val inputNum1: mut bool = false
 val inputNum2: mut bool = false
 val inputNum3: mut bool = false
@@ -435,6 +470,7 @@ val prevE: mut u8 = 0
 val prevEscape: mut u8 = 0
 val prevEnter: mut u8 = 0
 val prevSpace: mut u8 = 0
+val prevF12: mut u8 = 0
 val prevNum1: mut u8 = 0
 val prevNum2: mut u8 = 0
 val prevNum3: mut u8 = 0
@@ -555,6 +591,47 @@ fn load_sound(path: ref u8, volume: i32) ref void = trust {
         Mix_VolumeChunk(sound, volume)
     }
     return sound
+}
+
+fn take_screenshot() void = trust {
+    val base: ref u8 = SDL_GetBasePath()
+    if base == none {
+        return
+    }
+
+    val dirPath: mut [512]u8 = @zeroed
+    @snprintf(dirPath as ref u8, 512, "{s}screenshots", {base})
+    fs.mkdir_path(dirPath as ref u8)
+
+    screenshotCounter++
+    val filePath: mut [512]u8 = @zeroed
+    @snprintf(filePath as ref u8, 512, "{s}screenshots/screenshot_{d}_{d}.png", {
+            base,
+            SDL_GetTicks(),
+            screenshotCounter
+        })
+
+    val surface: ref void = SDL_CreateRGBSurfaceWithFormat(
+        0 as u32,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        32,
+        C.SDL_PIXELFORMAT_ARGB8888 as u32
+    )
+    if surface != none {
+        val surf: ref SDL_Surface = surface as ref SDL_Surface
+        if SDL_RenderReadPixels(
+            g_renderer,
+            none as ref void,
+            C.SDL_PIXELFORMAT_ARGB8888 as u32,
+            surf.pixels,
+            surf.pitch
+        ) == 0 {
+            IMG_SavePNG(surface, filePath as ref u8)
+        }
+        SDL_FreeSurface(surface)
+    }
+    SDL_free(base as ref void)
 }
 
 fn font_glyph(c: u8) u64 = trust {
@@ -1373,6 +1450,18 @@ fn menu_exit_y() i32 = {
     return 620
 }
 
+fn pause_button_x() i32 = {
+    return SCREEN_WIDTH / 2 - 190
+}
+
+fn pause_resume_y() i32 = {
+    return 480
+}
+
+fn pause_menu_y() i32 = {
+    return 580
+}
+
 fn shop_row_x() i32 = {
     return 260
 }
@@ -1462,6 +1551,138 @@ fn enter_death() void = trust {
     set_relative_mouse(false)
     save_progress()
     play_sound(g_deathSound)
+}
+
+fn update_pause() void = trust {
+    if inputClick {
+        if point_in(
+            pause_button_x(),
+            pause_resume_y(),
+            380,
+            76,
+            inputMouseX,
+            inputMouseY
+        ) {
+            play_sound(g_clickSound)
+            gameState = STATE_PLAYING
+            set_relative_mouse(true)
+            return
+        }
+        if point_in(
+            pause_button_x(),
+            pause_menu_y(),
+            380,
+            76,
+            inputMouseX,
+            inputMouseY
+        ) {
+            play_sound(g_clickSound)
+            save_progress()
+            gameState = STATE_MENU
+            set_relative_mouse(false)
+            return
+        }
+    }
+    if inputEscapePressed || inputEnterPressed || inputEPressed {
+        play_sound(g_clickSound)
+        gameState = STATE_PLAYING
+        set_relative_mouse(true)
+    }
+}
+
+fn render_pause() void = trust {
+    SDL_SetRenderDrawColor(g_renderer, 4 as u8, 6 as u8, 10 as u8, 255 as u8)
+    SDL_RenderClear(g_renderer)
+
+    for band = 0, band < 16, band++ {
+        val t: f32 = (band as f32) / 15.0
+        val cr: u8 = (7.0 + 9.0 * t) as u8
+        val cg: u8 = (9.0 + 12.0 * t) as u8
+        val cb: u8 = (16.0 + 20.0 * t) as u8
+        SDL_SetRenderDrawColor(g_renderer, cr, cg, cb, 255 as u8)
+        g_aux_rect.x = 0
+        g_aux_rect.y = band * SCREEN_HEIGHT / 16
+        g_aux_rect.w = SCREEN_WIDTH
+        g_aux_rect.h = SCREEN_HEIGHT / 16 + 1
+        SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+
+    draw_panel(190, 120, 900, 700, 8 as u8, 11 as u8, 16 as u8, 225 as u8)
+    draw_border(190, 120, 900, 700, 3, 96 as u8, 140 as u8, 188 as u8, 255 as u8)
+
+    draw_glow(SCREEN_WIDTH / 2, 240, 210, 76 as u8, 170 as u8, 255 as u8, 38 as u8)
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        190,
+        "PAUSED",
+        10,
+        150 as u8,
+        222 as u8,
+        255 as u8,
+        255 as u8
+    )
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        300,
+        "HEHEHEH",
+        4,
+        140 as u8,
+        156 as u8,
+        174 as u8,
+        255 as u8
+    )
+
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        380,
+        "WAVE",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    val waveWidth: i32 = text_width("WAVE", 3)
+    draw_int(
+        SCREEN_WIDTH / 2 + waveWidth / 2 + 18,
+        380,
+        wave,
+        3,
+        255 as u8,
+        236 as u8,
+        154 as u8,
+        255 as u8
+    )
+
+    val hoverResume: bool = point_in(
+        pause_button_x(),
+        pause_resume_y(),
+        380,
+        76,
+        uiMouseX,
+        uiMouseY
+    )
+    val hoverMenu: bool = point_in(
+        pause_button_x(),
+        pause_menu_y(),
+        380,
+        76,
+        uiMouseX,
+        uiMouseY
+    )
+    draw_button(pause_button_x(), pause_resume_y(), 380, 76, "RESUME", hoverResume)
+    draw_button(pause_button_x(), pause_menu_y(), 380, 76, "MAIN MENU", hoverMenu)
+
+    draw_text_centered(
+        SCREEN_WIDTH / 2,
+        770,
+        "ESC TO RESUME    F12 FOR SCREENSHOT",
+        2,
+        120 as u8,
+        138 as u8,
+        158 as u8,
+        255 as u8
+    )
 }
 
 fn render_menu() void = trust {
@@ -3973,11 +4194,13 @@ pub fn main() i32 = {
         val key4: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_4) * @sizeof(u8)))
         val key5: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_5) * @sizeof(u8)))
         val key6: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_6) * @sizeof(u8)))
+        val keyF12: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_F12) * @sizeof(u8)))
 
         inputEPressed = keyE != 0 && prevE == 0
         inputEscapePressed = keyEscape != 0 && prevEscape == 0
         inputEnterPressed = keyEnter != 0 && prevEnter == 0
         inputSpacePressed = keySpace != 0 && prevSpace == 0
+        inputF12Pressed = keyF12 != 0 && prevF12 == 0
         inputNum1 = key1 != 0 && prevNum1 == 0
         inputNum2 = key2 != 0 && prevNum2 == 0
         inputNum3 = key3 != 0 && prevNum3 == 0
@@ -4002,6 +4225,10 @@ pub fn main() i32 = {
             trust set_relative_mouse(false)
             trust update_menu()
             trust render_menu()
+        } elif gameState == STATE_PAUSED {
+            trust set_relative_mouse(false)
+            trust update_pause()
+            trust render_pause()
         } elif gameState == STATE_SHOP {
             trust set_relative_mouse(false)
             trust update_shop()
@@ -4035,10 +4262,10 @@ pub fn main() i32 = {
                 trust set_relative_mouse(false)
                 trust render_shop()
             } elif inputEscapePressed {
-                trust save_progress()
-                gameState = STATE_MENU
+                play_sound(g_clickSound)
+                gameState = STATE_PAUSED
                 trust set_relative_mouse(false)
-                trust render_menu()
+                trust render_pause()
             } else {
                 if inputNum1 {
                     switch_weapon(WEAPON_MACHINE_GUN)
@@ -4319,6 +4546,7 @@ pub fn main() i32 = {
         prevEscape = keyEscape
         prevEnter = keyEnter
         prevSpace = keySpace
+        prevF12 = keyF12
         prevNum1 = key1
         prevNum2 = key2
         prevNum3 = key3
@@ -4327,6 +4555,9 @@ pub fn main() i32 = {
         prevNum6 = key6
         prevMouseDown = mouseDown
 
+        if inputF12Pressed {
+            trust take_screenshot()
+        }
         trust SDL_RenderPresent(renderer)
         if quitRequested {
             break
