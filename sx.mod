@@ -14,5 +14,5 @@ build dev {
 
 build alt {
     flags "-alt -dynamic -inc-path:/usr/include/SDL2"
-    output "./cubedoom-dev"
+    output "./cubedoom-alt"
 }

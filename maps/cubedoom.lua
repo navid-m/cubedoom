@@ -20,11 +20,11 @@ local W = 32
 local H = 32
 
 local TEX = {
-    tech = "quake/tech01_1",
-    stone = "quake/stone1_3",
-    metal = "quake/metal1_3",
+    tech = "quake/tech08_2",
+    stone = "quake/dung01_1",
+    metal = "quake/tech07_2",
     floor = "quake/floor01_5",
-    ceiling = "quake/tech03_1",
+    ceiling = "quake/tech07_2",
 }
 
 local MATERIAL = {

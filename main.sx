@@ -1,8 +1,10 @@
 extern "SDL.h"
 extern "SDL_image.h"
+extern "SDL_mixer.h"
 
 link "-lSDL2"
 link "-lSDL2_image"
+link "-lSDL2_mixer"
 link "-lm"
 
 val fs  = use("std/fs")
@@ -16,11 +18,21 @@ val SCREEN_WIDTH: i32 = 1280
 val SCREEN_HEIGHT: i32 = 960
 val MAX_ENEMIES: i32 = 6
 val MAX_BULLETS: i32 = 32
+val MAX_TREES: i32 = 20
+val MAX_HEALTH_PICKUPS: i32 = 6
+val MAX_BILLBOARDS: i32 = 64
+val MAX_STARS: i32 = 160
 val ENEMY_SPEED: f32 = 50.0
 val BULLET_SPEED: f32 = 250.0
 val SHOOT_COOLDOWN_VAL: f32 = 0.4
 val ENEMY_SHOOT_INTERVAL: f32 = 2.0
 val PI: f32 = 3.14159265
+val FOV_HALF: f32 = 0.5838
+val WALL_UNITS: f32 = 128.0
+val TEX_WORLD_SIZE: f32 = 32.0
+val CELL_TEX_REPEATS: f32 = 2.0
+val WALL_TEX_REPEATS: i32 = 4
+val SPRINT_MULTIPLIER: f32 = 1.7
 
 extern type SDL_Rect = {
     x: mut i32
@@ -92,6 +104,33 @@ type BrushBounds = {
     texture: [128]u8
 }
 
+type Tree = {
+    x: mut f32
+    y: mut f32
+    scale: mut f32
+}
+
+type HealthPickup = {
+    x: mut f32
+    y: mut f32
+    active: mut i32
+    respawn: mut f32
+    bob: mut f32
+}
+
+type Star = {
+    angle: mut f32
+    altitude: mut f32
+    brightness: mut f32
+    phase: mut f32
+}
+
+type Billboard = {
+    kind: mut i32
+    index: mut i32
+    distance: mut f32
+}
+
 extern (C, header) fn SDL_Init(flags: u32) i32 = "SDL_Init"
 extern (C, header) fn SDL_CreateWindow(
     title: ref char,
@@ -154,11 +193,38 @@ extern (C, header) fn SDL_QueryTexture(
     h: ref void
 ) i32 = "SDL_QueryTexture"
 extern (C, header) fn IMG_Load(file: ref u8) ref void = "IMG_Load"
+extern (C, header) fn SDL_SetRenderDrawBlendMode(
+    renderer: ref void,
+    blendMode: i32
+) i32 = "SDL_SetRenderDrawBlendMode"
+extern (C, header) fn SDL_SetRelativeMouseMode(enabled: i32) i32 = "SDL_SetRelativeMouseMode"
+extern (C, header) fn SDL_GetRelativeMouseState(
+    x: ref i32,
+    y: ref i32
+) u32 = "SDL_GetRelativeMouseState"
+extern (C, header) fn SDL_GetMouseState(x: ref i32, y: ref i32) u32 = "SDL_GetMouseState"
+
+extern (C, header) fn Mix_OpenAudio(
+    freq: i32,
+    format: u16,
+    channels: i32,
+    chunksize: i32
+) i32 = "Mix_OpenAudio"
+extern (C, header) fn Mix_LoadWAV(file: ref u8) ref void = "Mix_LoadWAV"
+extern (C, header) fn Mix_PlayChannel(
+    channel: i32,
+    chunk: ref void,
+    loops: i32
+) i32 = "Mix_PlayChannel"
+extern (C, header) fn Mix_VolumeChunk(chunk: ref void, volume: i32) i32 = "Mix_VolumeChunk"
+extern (C, header) fn Mix_FreeChunk(chunk: ref void) void = "Mix_FreeChunk"
+extern (C, header) fn Mix_CloseAudio() void = "Mix_CloseAudio"
 
 extern (C) fn cosf(x: f32) f32 = "cosf"
 extern (C) fn sinf(x: f32) f32 = "sinf"
 extern (C) fn fabsf(x: f32) f32 = "fabsf"
 extern (C) fn sqrtf(x: f32) f32 = "sqrtf"
+extern (C) fn atan2f(y: f32, x: f32) f32 = "atan2f"
 
 val map: mut [32][32]i32 = @zeroed
 val wallTextures: mut [3]WallTexture = @zeroed
@@ -203,6 +269,23 @@ val bulletTexH: mut i32 = 32
 val g_src_rect: mut ref SDL_Rect = none
 val g_dst_rect: mut ref SDL_Rect = none
 val g_aux_rect: mut ref SDL_Rect = none
+val g_treeTex: mut ref void = none
+val g_healthTex: mut ref void = none
+val trees: mut [20]Tree = @zeroed
+val treeCount: mut i32 = 0
+val healthPickups: mut [6]HealthPickup = @zeroed
+val stars: mut [160]Star = @zeroed
+val starCount: mut i32 = 0
+val rng: mut u32 = 0x9E3779B9
+val pitch: mut f32 = 0.0
+val footstepTimer: mut f32 = 0.0
+val gameTime: mut f32 = 0.0
+val g_shootSound: mut ref void = none
+val g_enemyShootSound: mut ref void = none
+val g_hitSound: mut ref void = none
+val g_hurtSound: mut ref void = none
+val g_pickupSound: mut ref void = none
+val g_footstepSound: mut ref void = none
 
 fn get_enemy(i: i32) mut ref Enemy = {
     return trust @ptradd(enemies_buf, (i as usize) * @sizeof(Enemy)) as mut ref Enemy
@@ -224,6 +307,67 @@ fn enemy_spawn(index: i32) mut ref SpawnPoint = {
         enemySpawns as ref SpawnPoint,
         (index as usize) * @sizeof(SpawnPoint)
     ) as mut ref SpawnPoint
+}
+
+fn tree_at(index: i32) mut ref Tree = {
+    return trust @ptradd(trees as ref Tree, (index as usize) * @sizeof(Tree)) as mut ref Tree
+}
+
+fn pickup_at(index: i32) mut ref HealthPickup = {
+    return trust @ptradd(
+        healthPickups as ref HealthPickup,
+        (index as usize) * @sizeof(HealthPickup)
+    ) as mut ref HealthPickup
+}
+
+fn star_at(index: i32) mut ref Star = {
+    return trust @ptradd(stars as ref Star, (index as usize) * @sizeof(Star)) as mut ref Star
+}
+
+fn billboard_at(list: ref Billboard, index: i32) mut ref Billboard = {
+    return trust @ptradd(
+        list as ref Billboard,
+        (index as usize) * @sizeof(Billboard)
+    ) as mut ref Billboard
+}
+
+fn rand_next() u32 = {
+    rng = rng * 1664525 as u32 + 1013904223 as u32
+    return rng
+}
+
+fn rand_unit() f32 = {
+    return ((rand_next() % 10000) as f32) / 10000.0
+}
+
+fn play_sound(sound: ref void) void = {
+    if sound != none {
+        trust Mix_PlayChannel(-1 as i32, sound, 0 as i32)
+    }
+}
+
+fn rotate_player(angle: f32) void = trust {
+    val oldDirX: f32 = player.dirX
+    player.dirX = player.dirX * cosf(angle) - player.dirY * sinf(angle)
+    player.dirY = oldDirX * sinf(angle) + player.dirY * cosf(angle)
+
+    val oldPlaneX: f32 = player.planeX
+    player.planeX = player.planeX * cosf(angle) - player.planeY * sinf(angle)
+    player.planeY = oldPlaneX * sinf(angle) + player.planeY * cosf(angle)
+}
+
+fn try_move_player(dx: f32, dy: f32) void = {
+    val moveY0: i32 = ((player.y + 4.0) / (TILE_SIZE as f32)) as i32
+    val moveX0: i32 = ((player.x + 4.0 + dx) / (TILE_SIZE as f32)) as i32
+    if map_at(moveX0, moveY0) == 0 {
+        player.x += dx
+    }
+
+    val moveY1: i32 = ((player.y + 4.0 + dy) / (TILE_SIZE as f32)) as i32
+    val moveX1: i32 = ((player.x + 4.0) / (TILE_SIZE as f32)) as i32
+    if map_at(moveX1, moveY1) == 0 {
+        player.y += dy
+    }
 }
 
 fn map_at(x: i32, y: i32) i32 = {
@@ -408,13 +552,13 @@ fn after_third_close_paren(line: ref u8) i64 = trust {
 }
 
 fn texture_id(name: ref u8) i32 = {
-    if str.str_eql(name, "quake/tech01_1") {
+    if str.str_eql(name, "quake/tech08_2") {
         return 1
     }
-    if str.str_eql(name, "quake/stone1_3") {
+    if str.str_eql(name, "quake/dung01_1") {
         return 2
     }
-    if str.str_eql(name, "quake/metal1_3") {
+    if str.str_eql(name, "quake/tech07_2") {
         return 3
     }
     return 1
@@ -680,6 +824,7 @@ fn player_shoot() void = {
     }
     shootCooldown = SHOOT_COOLDOWN_VAL
     muzzleFlashTimer = 0.14
+    play_sound(g_shootSound)
 
     val pCX: f32 = player.x + 4.0
     val pCY: f32 = player.y + 4.0
@@ -750,6 +895,8 @@ fn update_enemies(dt: f32) void = {
                             blt.dy = (bdy / bdist) * BULLET_SPEED
                             blt.alive = 1
                             blt.isPlayer = 0
+                            blt.animTime = 0.0
+                            play_sound(g_enemyShootSound)
                         }
                         break
                     }
@@ -792,6 +939,7 @@ fn update_bullets(dt: f32) void = {
                         playerHealth = 0
                     }
                     hitFlashTimer = 0.2
+                    play_sound(g_hurtSound)
                 }
             } else {
                 val ei: mut i32 = 0
@@ -807,6 +955,7 @@ fn update_bullets(dt: f32) void = {
                                 e.alive = 0
                             }
                             blt.alive = 0
+                            play_sound(g_hitSound)
                             break
                         }
                     }
@@ -818,7 +967,412 @@ fn update_bullets(dt: f32) void = {
     }
 }
 
-fn render_sprites() void = {
+fn billboard_texture(kind: i32) ref void = {
+    if kind == 2 {
+        return g_treeTex
+    }
+    if kind == 3 {
+        return g_healthTex
+    }
+    if kind == 4 || kind == 5 {
+        return g_bulletTex
+    }
+    return g_enemyTex
+}
+
+fn billboard_src(
+    kind: i32,
+    x: mut ref i32,
+    y: mut ref i32,
+    w: mut ref i32,
+    h: mut ref i32
+) void = trust {
+    if kind == 2 {
+        @deref(x) = 187
+        @deref(y) = 4
+        @deref(w) = 222
+        @deref(h) = 319
+    } elif kind == 3 {
+        @deref(x) = 50
+        @deref(y) = 30
+        @deref(w) = 240
+        @deref(h) = 280
+    } elif kind == 4 || kind == 5 {
+        @deref(x) = 0
+        @deref(y) = 0
+        @deref(w) = bulletTexW / 4
+        @deref(h) = bulletTexH
+    } else {
+        @deref(x) = 55
+        @deref(y) = 40
+        @deref(w) = 180
+        @deref(h) = 275
+    }
+}
+
+fn fill_circle(cx: i32, cy: i32, radius: i32, r: u8, g: u8, b: u8, a: u8) void = {
+    if radius < 1 {
+        return
+    }
+    trust SDL_SetRenderDrawColor(g_renderer, r, g, b, a)
+    for dy = -radius, dy <= radius, dy++ {
+        val inner: f32 = (radius * radius - dy * dy) as f32
+        val dx: i32 = (trust sqrtf(inner)) as i32
+        g_aux_rect.x = cx - dx
+        g_aux_rect.y = cy + dy
+        g_aux_rect.w = dx * 2 + 1
+        g_aux_rect.h = 1
+        trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+}
+
+fn draw_glow(cx: i32, cy: i32, radius: i32, r: u8, g: u8, b: u8, alpha: u8) void = {
+    if radius < 1 {
+        return
+    }
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 2 as i32)
+    for layer = 0, layer < 4, layer++ {
+        val layerRadius: i32 = radius - (radius * layer) / 5
+        val layerAlpha: u8 = ((alpha as i32) * (4 - layer) / 4) as u8
+        fill_circle(cx, cy, layerRadius, r, g, b, layerAlpha)
+    }
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+}
+
+fn draw_flare_chain(x: i32, y: i32, strength: f32) void = {
+    val centerX: i32 = SCREEN_WIDTH / 2
+    val centerY: i32 = SCREEN_HEIGHT / 2
+    val dx: i32 = centerX - x
+    val dy: i32 = centerY - y
+
+    for step = 0, step < 4, step++ {
+        val factor: f32 = 0.22 + (step as f32) * 0.27
+        val fx: i32 = x + ((dx as f32) * factor) as i32
+        val fy: i32 = y + ((dy as f32) * factor) as i32
+        val radius: i32 = 17 - step * 3
+        val alpha: u8 = ((strength * (68.0 - (step as f32) * 11.0)) as i32) as u8
+        draw_glow(fx, fy, radius, 255 as u8, 190 as u8, 105 as u8, alpha)
+    }
+}
+
+fn normalize_angle(angle: f32) f32 = {
+    val value: mut f32 = angle
+    for {
+        if value > PI {
+            value -= 2.0 * PI
+        } elif value < -PI {
+            value += 2.0 * PI
+        } else {
+            break
+        }
+    }
+    return value
+}
+
+fn draw_sky(horizon: f32, time: f32) void = {
+    val bottom: mut i32 = horizon as i32
+    if bottom < 0 {
+        bottom = 0
+    }
+    if bottom > SCREEN_HEIGHT {
+        bottom = SCREEN_HEIGHT
+    }
+
+    if bottom > 0 {
+        for band = 0, band < 20, band++ {
+            val t: f32 = (band as f32) / 19.0
+            val r: u8 = (7.0 + 24.0 * t) as u8
+            val g: u8 = (9.0 + 17.0 * t) as u8
+            val b: u8 = (26.0 + 28.0 * t) as u8
+            trust SDL_SetRenderDrawColor(g_renderer, r, g, b, 255 as u8)
+            val y0: i32 = bottom * band / 20
+            val y1: i32 = bottom * (band + 1) / 20
+            g_aux_rect.x = 0
+            g_aux_rect.y = y0
+            g_aux_rect.w = SCREEN_WIDTH
+            g_aux_rect.h = y1 - y0
+            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+        }
+    }
+
+    val yaw: f32 = trust atan2f(player.dirY, player.dirX)
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    for index = 0, index < starCount, index++ {
+        val star: ref Star = star_at(index)
+        val relative: f32 = normalize_angle(star.angle - yaw)
+        if trust fabsf(relative) < FOV_HALF + 0.12 {
+            val sx: i32 = SCREEN_WIDTH / 2 + ((relative / FOV_HALF) * (SCREEN_WIDTH as f32 / 2.0)) as i32
+            val sy: i32 = bottom - ((star.altitude * (bottom as f32)) as i32)
+            val twinkle: f32 = 0.62 + 0.38 * trust sinf(time * 2.0 + star.phase)
+            val brightness: u8 = (star.brightness * twinkle) as u8
+            val size: mut i32 = 1
+            if star.brightness > 205.0 {
+                size = 2
+            }
+            trust SDL_SetRenderDrawColor(g_renderer, brightness, brightness, 255 as u8, 220 as u8)
+            g_aux_rect.x = sx
+            g_aux_rect.y = sy
+            g_aux_rect.w = size
+            g_aux_rect.h = size
+            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+        }
+    }
+
+    val sunAngle: f32 = 2.15
+    val sunAltitude: f32 = 0.76
+    val sunRelative: f32 = normalize_angle(sunAngle - yaw)
+    if trust fabsf(sunRelative) < FOV_HALF + 0.25 {
+        val sunX: i32 = SCREEN_WIDTH / 2 + ((sunRelative / FOV_HALF) * (SCREEN_WIDTH as f32 / 2.0)) as i32
+        val sunY: i32 = bottom - ((sunAltitude * (bottom as f32)) as i32)
+        draw_glow(sunX, sunY, 48, 255 as u8, 210 as u8, 140 as u8, 70 as u8)
+        draw_glow(sunX, sunY, 18, 255 as u8, 245 as u8, 210 as u8, 150 as u8)
+        draw_flare_chain(sunX, sunY, 0.65)
+    }
+
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn draw_ground(horizon: f32) void = {
+    val top: mut i32 = horizon as i32
+    if top < 0 {
+        top = 0
+    }
+    if top >= SCREEN_HEIGHT {
+        return
+    }
+
+    for band = 0, band < 18, band++ {
+        val t: f32 = (band as f32) / 17.0
+        val r: u8 = (48.0 - 32.0 * t) as u8
+        val g: u8 = (44.0 - 29.0 * t) as u8
+        val b: u8 = (41.0 - 27.0 * t) as u8
+        trust SDL_SetRenderDrawColor(g_renderer, r, g, b, 255 as u8)
+        val y0: i32 = top + (SCREEN_HEIGHT - top) * band / 18
+        val y1: i32 = top + (SCREEN_HEIGHT - top) * (band + 1) / 18
+        g_aux_rect.x = 0
+        g_aux_rect.y = y0
+        g_aux_rect.w = SCREEN_WIDTH
+        g_aux_rect.h = y1 - y0
+        trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    }
+}
+
+fn init_sky() void = {
+    starCount = MAX_STARS
+    for index = 0, index < MAX_STARS, index++ {
+        val star: mut ref Star = star_at(index)
+        star.angle = rand_unit() * 2.0 * PI
+        star.altitude = 0.06 + rand_unit() * 0.88
+        star.brightness = 90.0 + rand_unit() * 165.0
+        star.phase = rand_unit() * 2.0 * PI
+    }
+}
+
+fn cell_has_enemy(cx: i32, cy: i32) bool = {
+    for index = 0, index < enemySpawnCount, index++ {
+        val spawn: ref SpawnPoint = enemy_spawn(index)
+        if ((spawn.x / (TILE_SIZE as f32)) as i32) == cx {
+            if ((spawn.y / (TILE_SIZE as f32)) as i32) == cy {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn cell_near_spawn(cx: i32, cy: i32) bool = {
+    val spawnCellX: i32 = (spawnX / (TILE_SIZE as f32)) as i32
+    val spawnCellY: i32 = (spawnY / (TILE_SIZE as f32)) as i32
+    val dx: i32 = cx - spawnCellX
+    val dy: i32 = cy - spawnCellY
+    return dx * dx + dy * dy < 25
+}
+
+fn cell_has_tree(cx: i32, cy: i32) bool = {
+    for index = 0, index < treeCount, index++ {
+        val tree: ref Tree = tree_at(index)
+        if ((tree.x / (TILE_SIZE as f32)) as i32) == cx {
+            if ((tree.y / (TILE_SIZE as f32)) as i32) == cy {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+fn cell_near_pickup(count: i32, cx: i32, cy: i32) bool = {
+    for index = 0, index < count, index++ {
+        val pickup: ref HealthPickup = pickup_at(index)
+        val dx: i32 = cx - ((pickup.x / (TILE_SIZE as f32)) as i32)
+        val dy: i32 = cy - ((pickup.y / (TILE_SIZE as f32)) as i32)
+        if dx * dx + dy * dy < 16 {
+            return true
+        }
+    }
+    return false
+}
+
+fn init_trees() void = {
+    treeCount = 0
+    for y = 1, y < MAP_SIZE - 1, y++ {
+        for x = 1, x < MAP_SIZE - 1, x++ {
+            if treeCount >= MAX_TREES {
+                return
+            }
+            if map_at(x, y) == 0 && !cell_near_spawn(x, y) && !cell_has_enemy(x, y) {
+                if rand_next() % 100 < 7 {
+                    val tree: mut ref Tree = tree_at(treeCount)
+                    tree.x = (x as f32) * (TILE_SIZE as f32) + 32.0 + (rand_unit() * 20.0 - 10.0)
+                    tree.y = (y as f32) * (TILE_SIZE as f32) + 32.0 + (rand_unit() * 20.0 - 10.0)
+                    tree.scale = 0.8 + rand_unit() * 0.45
+                    treeCount++
+                }
+            }
+        }
+    }
+}
+
+fn init_pickups() void = {
+    for index = 0, index < MAX_HEALTH_PICKUPS, index++ {
+        val pickup: mut ref HealthPickup = pickup_at(index)
+        pickup.active = 0
+        pickup.respawn = 0.0
+        pickup.bob = rand_unit() * 2.0 * PI
+
+        val attempts: mut i32 = 0
+        for attempts < 400 {
+            val x: i32 = (rand_next() % ((MAP_SIZE - 2) as u32)) as i32 + 1
+            val y: i32 = (rand_next() % ((MAP_SIZE - 2) as u32)) as i32 + 1
+            if map_at(
+                x,
+                y
+            ) == 0 && !cell_near_spawn(
+                x,
+                y
+            ) && !cell_has_enemy(x, y) && !cell_has_tree(x, y) && !cell_near_pickup(index, x, y) {
+                pickup.x = (x as f32) * (TILE_SIZE as f32) + 32.0
+                pickup.y = (y as f32) * (TILE_SIZE as f32) + 32.0
+                pickup.active = 1
+                break
+            }
+            attempts++
+        }
+    }
+}
+
+fn update_pickups(dt: f32) void = {
+    val pCX: f32 = player.x + 4.0
+    val pCY: f32 = player.y + 4.0
+
+    for index = 0, index < MAX_HEALTH_PICKUPS, index++ {
+        val pickup: mut ref HealthPickup = pickup_at(index)
+        if pickup.active != 0 {
+            val dx: f32 = pickup.x - pCX
+            val dy: f32 = pickup.y - pCY
+            if dx * dx + dy * dy < 784.0 {
+                playerHealth += 25
+                if playerHealth > 100 {
+                    playerHealth = 100
+                }
+                pickup.active = 0
+                pickup.respawn = 16.0
+                play_sound(g_pickupSound)
+            }
+        } else {
+            pickup.respawn -= dt
+            if pickup.respawn <= 0.0 {
+                pickup.active = 1
+            }
+        }
+    }
+}
+
+fn add_billboard(
+    list: ref Billboard,
+    count: mut ref i32,
+    kind: i32,
+    index: i32,
+    px: f32,
+    py: f32
+) void = trust {
+    if @deref(count) >= MAX_BILLBOARDS {
+        return
+    }
+    val billboard: mut ref Billboard = billboard_at(list, @deref(count))
+    val dx: f32 = px - (player.x + 4.0)
+    val dy: f32 = py - (player.y + 4.0)
+    billboard.kind = kind
+    billboard.index = index
+    billboard.distance = dx * dx + dy * dy
+    @deref(count) = @deref(count) + 1
+}
+
+fn render_billboards() void = trust {
+    val list: mut [64]Billboard = @zeroed
+    val count: mut i32 = 0
+
+    for index = 0, index < MAX_ENEMIES, index++ {
+        val enemy: ref Enemy = get_enemy(index)
+        if enemy.alive != 0 {
+            add_billboard(
+                list as ref Billboard,
+                @addr(count),
+                1,
+                index,
+                enemy.x + 4.0,
+                enemy.y + 4.0
+            )
+        }
+    }
+
+    for index = 0, index < treeCount, index++ {
+        val tree: ref Tree = tree_at(index)
+        add_billboard(list as ref Billboard, @addr(count), 2, index, tree.x, tree.y)
+    }
+
+    for index = 0, index < MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref HealthPickup = pickup_at(index)
+        if pickup.active != 0 {
+            add_billboard(list as ref Billboard, @addr(count), 3, index, pickup.x, pickup.y)
+        }
+    }
+
+    for index = 0, index < MAX_BULLETS, index++ {
+        val bullet: ref Bullet = get_bullet(index)
+        if bullet.alive != 0 {
+            val kind: mut i32 = 4
+            if bullet.isPlayer != 0 {
+                kind = 5
+            }
+            add_billboard(list as ref Billboard, @addr(count), kind, index, bullet.x, bullet.y)
+        }
+    }
+
+    for i = 0, i < count - 1, i++ {
+        val farthest: mut i32 = i
+        for j = i + 1, j < count, j++ {
+            if billboard_at(
+                list as ref Billboard,
+                j
+            ).distance > billboard_at(list as ref Billboard, farthest).distance {
+                farthest = j
+            }
+        }
+        if farthest != i {
+            val a: mut ref Billboard = billboard_at(list as ref Billboard, i)
+            val b: mut ref Billboard = billboard_at(list as ref Billboard, farthest)
+            val aKind: i32 = a.kind
+            val aIndex: i32 = a.index
+            val aDistance: f32 = a.distance
+            a.kind = b.kind
+            a.index = b.index
+            a.distance = b.distance
+            b.kind = aKind
+            b.index = aIndex
+            b.distance = aDistance
+        }
+    }
+
     val pCX: f32 = player.x + 4.0
     val pCY: f32 = player.y + 4.0
     val det: f32 = player.planeX * player.dirY - player.dirX * player.planeY
@@ -826,30 +1380,88 @@ fn render_sprites() void = {
         return
     }
     val invDet: f32 = 1.0 / det
+    val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch
 
-    val ei: mut i32 = 0
-    for ei < MAX_ENEMIES {
-        val e: ref Enemy = get_enemy(ei)
-        if e.alive != 0 {
-            val dx: f32 = (e.x + 4.0) - pCX
-            val dy: f32 = (e.y + 4.0) - pCY
-            val tx: f32 = invDet * (player.dirY * dx - player.dirX * dy)
-            val ty: f32 = invDet * (-player.planeY * dx + player.planeX * dy)
+    for index = 0, index < count, index++ {
+        val billboard: ref Billboard = billboard_at(list as ref Billboard, index)
+        val kind: i32 = billboard.kind
+        val itemIndex: i32 = billboard.index
+        val worldX: mut f32 = 0.0
+        val worldY: mut f32 = 0.0
+        val heightUnits: mut f32 = 1.0
 
-            if ty > 0.1 {
-                val depth: f32 = ty / (TILE_SIZE as f32)
-                val screenX: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
-                val spriteH: i32 = (trust fabsf(SCREEN_HEIGHT as f32 / depth)) as i32
-                val spriteW: i32 = spriteH * enemyTexW / enemyTexH
+        if kind == 1 {
+            val enemy: ref Enemy = get_enemy(itemIndex)
+            worldX = enemy.x + 4.0
+            worldY = enemy.y + 4.0
+            heightUnits = 1.05
+        } elif kind == 2 {
+            val tree: ref Tree = tree_at(itemIndex)
+            worldX = tree.x
+            worldY = tree.y
+            heightUnits = 1.7 * tree.scale
+        } elif kind == 3 {
+            val pickup: ref HealthPickup = pickup_at(itemIndex)
+            worldX = pickup.x
+            worldY = pickup.y
+            heightUnits = 0.42
+        } elif kind == 4 || kind == 5 {
+            val bullet: ref Bullet = get_bullet(itemIndex)
+            worldX = bullet.x
+            worldY = bullet.y
+            heightUnits = 0.12
+        }
 
-                if spriteW > 0 {
-                    val drawStartY: mut i32 = SCREEN_HEIGHT / 2 - spriteH / 2
-                    val drawEndY: mut i32 = SCREEN_HEIGHT / 2 + spriteH / 2
-                    if drawStartY < 0 {
-                        drawStartY = 0
-                    }
-                    if drawEndY >= SCREEN_HEIGHT {
-                        drawEndY = SCREEN_HEIGHT - 1
+        val dx: f32 = worldX - pCX
+        val dy: f32 = worldY - pCY
+        val tx: f32 = invDet * (player.dirY * dx - player.dirX * dy)
+        val ty: f32 = invDet * (-player.planeY * dx + player.planeX * dy)
+
+        if ty > 0.1 {
+            val depth: f32 = ty / (TILE_SIZE as f32)
+            val unit: f32 = (SCREEN_HEIGHT as f32) / depth
+            val screenX: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
+
+            val srcX: mut i32 = 0
+            val srcY: mut i32 = 0
+            val srcW: mut i32 = 1
+            val srcH: mut i32 = 1
+            billboard_src(kind, @addr(srcX), @addr(srcY), @addr(srcW), @addr(srcH))
+            if kind == 4 || kind == 5 {
+                val bullet: ref Bullet = get_bullet(itemIndex)
+                val frame: i32 = ((bullet.animTime * 8.0) as i32) % 4
+                srcX = frame * (bulletTexW / 4)
+            }
+
+            val spriteH: i32 = (unit * heightUnits) as i32
+            val spriteW: i32 = spriteH * srcW / srcH
+            if spriteH > 0 && spriteW > 0 {
+                val floorY: f32 = horizon + unit
+                val bottomY: mut f32 = floorY
+                if kind == 3 {
+                    bottomY = floorY - unit * 0.10 - sinf(gameTime * 2.2 + (itemIndex as f32)) * 4.0
+                } elif kind == 4 || kind == 5 {
+                    bottomY = horizon + unit * 0.12
+                }
+                val topY: f32 = bottomY - (spriteH as f32)
+
+                val clipTopF: mut f32 = topY
+                val clipBottomF: mut f32 = bottomY
+                if clipTopF < 0.0 {
+                    clipTopF = 0.0
+                }
+                if clipBottomF > (SCREEN_HEIGHT as f32) {
+                    clipBottomF = SCREEN_HEIGHT as f32
+                }
+
+                if clipBottomF > clipTopF {
+                    val drawStartY: i32 = clipTopF as i32
+                    val drawEndY: i32 = clipBottomF as i32
+                    val visibleH: f32 = clipBottomF - clipTopF
+                    val srcYAdjusted: i32 = srcY + ((srcH as f32) * ((clipTopF - topY) / (spriteH as f32))) as i32
+                    val srcHAdjusted: mut i32 = ((srcH as f32) * (visibleH / (spriteH as f32))) as i32
+                    if srcHAdjusted < 1 {
+                        srcHAdjusted = 1
                     }
 
                     val drawStartX: mut i32 = screenX - spriteW / 2
@@ -863,194 +1475,93 @@ fn render_sprites() void = {
 
                     val scaledDist: usize = (depth * 100000.0) as usize
                     val spriteLeft: i32 = screenX - spriteW / 2
+                    val texture: ref void = billboard_texture(kind)
 
-                    val xi: mut i32 = drawStartX
-                    for xi < drawEndX {
-                        val zbufVal: usize = trust @load(@ptradd(zbuf, (xi as usize) * 8)) as usize
-                        if scaledDist < zbufVal {
-                            val texX: i32 = ((xi - spriteLeft) * enemyTexW) / spriteW
-                            g_src_rect.x = texX
-                            g_src_rect.y = 0
-                            g_src_rect.w = 1
-                            g_src_rect.h = enemyTexH
-                            g_dst_rect.x = xi
-                            g_dst_rect.y = drawStartY
-                            g_dst_rect.w = 1
-                            g_dst_rect.h = drawEndY - drawStartY
-                            trust SDL_RenderCopy(
-                                g_renderer,
-                                g_enemyTex,
-                                g_src_rect as ref void,
-                                g_dst_rect as ref void
-                            )
-                        }
-                        xi++
-                    }
-                }
-            }
-        }
-        ei++
-    }
-
-    val bi: mut i32 = 0
-    for bi < MAX_BULLETS {
-        val blt: ref Bullet = get_bullet(bi)
-        if blt.alive != 0 && blt.isPlayer == 0 {
-            val bdx: f32 = blt.x - pCX
-            val bdy: f32 = blt.y - pCY
-            val btx: f32 = invDet * (player.dirY * bdx - player.dirX * bdy)
-            val bty: f32 = invDet * (-player.planeY * bdx + player.planeX * bdy)
-
-            if bty > 0.1 {
-                val depth: f32 = bty / (TILE_SIZE as f32)
-                val bsx: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + btx / bty)) as i32
-                val bH: mut i32 = (trust fabsf(SCREEN_HEIGHT as f32 / depth)) as i32 / 8
-                if bH < 3 {
-                    bH = 3
-                }
-                if bH > 80 {
-                    bH = 80
-                }
-
-                val bsX: mut i32 = bsx - bH / 2
-                val beX: mut i32 = bsx + bH / 2
-                val bsY: mut i32 = SCREEN_HEIGHT / 2 - bH / 2
-                val beY: mut i32 = SCREEN_HEIGHT / 2 + bH / 2
-                if bsX < 0 {
-                    bsX = 0
-                }
-                if beX >= SCREEN_WIDTH {
-                    beX = SCREEN_WIDTH - 1
-                }
-                if bsY < 0 {
-                    bsY = 0
-                }
-                if beY >= SCREEN_HEIGHT {
-                    beY = SCREEN_HEIGHT - 1
-                }
-
-                if bsx >= 0 && bsx < SCREEN_WIDTH {
-                    val bZdist: usize = trust @load(@ptradd(zbuf, (bsx as usize) * 8)) as usize
-                    val bZscaled: usize = (depth * 100000.0) as usize
-                    if bZscaled < bZdist {
-                        if g_bulletTex != none {
-                            val frame: i32 = ((blt.animTime * 8.0) as i32) % 4
-                            g_src_rect.x = frame * (bulletTexW / 4)
-                            g_src_rect.y = 0
-                            g_src_rect.w = bulletTexW / 4
-                            g_src_rect.h = bulletTexH
-
-                            g_dst_rect.x = bsX
-                            g_dst_rect.y = bsY
-                            g_dst_rect.w = beX - bsX
-                            g_dst_rect.h = beY - bsY
-
-                            trust SDL_RenderCopy(
-                                g_renderer,
-                                g_bulletTex,
-                                g_src_rect as ref void,
-                                g_dst_rect as ref void
-                            )
-                        } else {
-                            trust SDL_SetRenderDrawColor(
-                                g_renderer,
-                                255 as u8,
-                                100 as u8,
-                                0 as u8,
-                                255 as u8
-                            )
-                            g_aux_rect.x = bsX
-                            g_aux_rect.y = bsY
-                            g_aux_rect.w = beX - bsX
-                            g_aux_rect.h = beY - bsY
-                            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+                    if texture != none {
+                        val xi: mut i32 = drawStartX
+                        for xi < drawEndX {
+                            val zbufVal: usize = @load(@ptradd(zbuf, (xi as usize) * 8)) as usize
+                            if scaledDist < zbufVal {
+                                val texX: i32 = srcX + ((xi - spriteLeft) * srcW) / spriteW
+                                if texX >= srcX && texX < srcX + srcW {
+                                    g_src_rect.x = texX
+                                    g_src_rect.y = srcYAdjusted
+                                    g_src_rect.w = 1
+                                    g_src_rect.h = srcHAdjusted
+                                    g_dst_rect.x = xi
+                                    g_dst_rect.y = drawStartY
+                                    g_dst_rect.w = 1
+                                    g_dst_rect.h = drawEndY - drawStartY
+                                    SDL_RenderCopy(
+                                        g_renderer,
+                                        texture,
+                                        g_src_rect as ref void,
+                                        g_dst_rect as ref void
+                                    )
+                                }
+                            }
+                            xi++
                         }
                     }
                 }
             }
         }
-        bi++
     }
 
-    val pi: mut i32 = 0
-    for pi < MAX_BULLETS {
-        val pblt: ref Bullet = get_bullet(pi)
-        if pblt.alive != 0 && pblt.isPlayer != 0 {
-            val pbdx: f32 = pblt.x - pCX
-            val pbdy: f32 = pblt.y - pCY
-            val pbtx: f32 = invDet * (player.dirY * pbdx - player.dirX * pbdy)
-            val pbty: f32 = invDet * (-player.planeY * pbdx + player.planeX * pbdy)
-
-            if pbty > 0.1 {
-                val pdepth: f32 = pbty / (TILE_SIZE as f32)
-                val pbsx: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + pbtx / pbty)) as i32
-                val pbH: mut i32 = (trust fabsf(SCREEN_HEIGHT as f32 / pdepth)) as i32 / 8
-                if pbH < 3 {
-                    pbH = 3
-                }
-                if pbH > 80 {
-                    pbH = 80
-                }
-
-                val pbsX: mut i32 = pbsx - pbH / 2
-                val pbeX: mut i32 = pbsx + pbH / 2
-                val pbsY: mut i32 = SCREEN_HEIGHT / 2 - pbH / 2
-                val pbeY: mut i32 = SCREEN_HEIGHT / 2 + pbH / 2
-                if pbsX < 0 {
-                    pbsX = 0
-                }
-                if pbeX >= SCREEN_WIDTH {
-                    pbeX = SCREEN_WIDTH - 1
-                }
-                if pbsY < 0 {
-                    pbsY = 0
-                }
-                if pbeY >= SCREEN_HEIGHT {
-                    pbeY = SCREEN_HEIGHT - 1
-                }
-
-                if pbsx >= 0 && pbsx < SCREEN_WIDTH {
-                    val pbZdist: usize = trust @load(@ptradd(zbuf, (pbsx as usize) * 8)) as usize
-                    val pbZscaled: usize = (pdepth * 100000.0) as usize
-                    if pbZscaled < pbZdist {
-                        if g_bulletTex != none {
-                            val pframe: i32 = ((pblt.animTime * 8.0) as i32) % 4
-                            g_src_rect.x = pframe * (bulletTexW / 4)
-                            g_src_rect.y = 0
-                            g_src_rect.w = bulletTexW / 4
-                            g_src_rect.h = bulletTexH
-
-                            g_dst_rect.x = pbsX
-                            g_dst_rect.y = pbsY
-                            g_dst_rect.w = pbeX - pbsX
-                            g_dst_rect.h = pbeY - pbsY
-
-                            trust SDL_RenderCopy(
-                                g_renderer,
-                                g_bulletTex,
-                                g_src_rect as ref void,
-                                g_dst_rect as ref void
-                            )
-                        } else {
-                            trust SDL_SetRenderDrawColor(
-                                g_renderer,
-                                0 as u8,
-                                200 as u8,
-                                255 as u8,
-                                255 as u8
-                            )
-                            g_aux_rect.x = pbsX
-                            g_aux_rect.y = pbsY
-                            g_aux_rect.w = pbeX - pbsX
-                            g_aux_rect.h = pbeY - pbsY
-                            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
-                        }
+    for index = 0, index < MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref HealthPickup = pickup_at(index)
+        if pickup.active != 0 {
+            val dx: f32 = pickup.x - pCX
+            val dy: f32 = pickup.y - pCY
+            val tx: f32 = invDet * (player.dirY * dx - player.dirX * dy)
+            val ty: f32 = invDet * (-player.planeY * dx + player.planeX * dy)
+            if ty > 0.1 {
+                val depth: f32 = ty / (TILE_SIZE as f32)
+                val unit: f32 = (SCREEN_HEIGHT as f32) / depth
+                val screenX: i32 = ((SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
+                val centerY: i32 = (horizon + unit * 0.62) as i32
+                val visible: mut bool = false
+                if screenX >= 0 && screenX < SCREEN_WIDTH {
+                    val wallDistance: usize = @load(@ptradd(zbuf, (screenX as usize) * 8)) as usize
+                    val spriteDistance: usize = (depth * 100000.0) as usize
+                    if spriteDistance < wallDistance {
+                        visible = true
                     }
+                }
+                if visible {
+                    draw_glow(
+                        screenX,
+                        centerY,
+                        (unit * 0.16) as i32 + 6,
+                        80 as u8,
+                        255 as u8,
+                        120 as u8,
+                        34 as u8
+                    )
+                    SDL_SetRenderDrawBlendMode(g_renderer, 2 as i32)
+                    for particle = 0, particle < 6, particle++ {
+                        val raw: f32 = gameTime * 0.55 + (index as f32) * 0.19 + (particle as f32) * 0.166
+                        val phase: f32 = raw - (raw as i32) as f32
+                        val px: i32 = screenX + (sinf(gameTime * 1.7 + (particle as f32) * 1.9 + (index as f32)) * 22.0) as i32
+                        val py: i32 = (horizon + unit * 0.95 - phase * unit * 0.85) as i32
+                        val alpha: u8 = ((1.0 - phase) * 130.0) as u8
+                        fill_circle(
+                            px,
+                            py,
+                            2 + (particle % 2),
+                            90 as u8,
+                            255 as u8,
+                            140 as u8,
+                            alpha
+                        )
+                    }
+                    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
                 }
             }
         }
-        pi++
     }
+
+    SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
 }
 
 fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = {
@@ -1085,24 +1596,199 @@ fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = {
         g_aux_rect.w = flashSize / 2
         g_aux_rect.h = flashSize / 2
         trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+
+        draw_glow(
+            fX + flashSize / 2,
+            fY + flashSize / 2,
+            96,
+            255 as u8,
+            185 as u8,
+            65 as u8,
+            95 as u8
+        )
+        draw_flare_chain(fX + flashSize / 2, fY + flashSize / 2, 0.32)
     }
 }
 
-fn render_hud() void = {
-    trust SDL_SetRenderDrawColor(g_renderer, 80 as u8, 0 as u8, 0 as u8, 255 as u8)
-    g_aux_rect.x = 18
-    g_aux_rect.y = SCREEN_HEIGHT - 42
-    g_aux_rect.w = 204
-    g_aux_rect.h = 24
+fn render_damage() void = {
+    if hitFlashTimer <= 0.0 {
+        return
+    }
+    val alpha: u8 = ((hitFlashTimer * 280.0) as i32) as u8
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    trust SDL_SetRenderDrawColor(g_renderer, 175 as u8, 20 as u8, 20 as u8, alpha)
+    g_aux_rect.x = 0
+    g_aux_rect.y = 0
+    g_aux_rect.w = SCREEN_WIDTH
+    g_aux_rect.h = 22
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = 0
+    g_aux_rect.y = SCREEN_HEIGHT - 22
+    g_aux_rect.w = SCREEN_WIDTH
+    g_aux_rect.h = 22
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = 0
+    g_aux_rect.y = 0
+    g_aux_rect.w = 22
+    g_aux_rect.h = SCREEN_HEIGHT
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = SCREEN_WIDTH - 22
+    g_aux_rect.y = 0
+    g_aux_rect.w = 22
+    g_aux_rect.h = SCREEN_HEIGHT
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn render_crosshair() void = {
+    val centerX: i32 = SCREEN_WIDTH / 2
+    val centerY: i32 = SCREEN_HEIGHT / 2
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    trust SDL_SetRenderDrawColor(g_renderer, 235 as u8, 245 as u8, 255 as u8, 165 as u8)
+    g_aux_rect.x = centerX - 1
+    g_aux_rect.y = centerY - 1
+    g_aux_rect.w = 3
+    g_aux_rect.h = 3
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = centerX - 10
+    g_aux_rect.y = centerY
+    g_aux_rect.w = 6
+    g_aux_rect.h = 1
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = centerX + 5
+    g_aux_rect.y = centerY
+    g_aux_rect.w = 6
+    g_aux_rect.h = 1
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = centerX
+    g_aux_rect.y = centerY - 10
+    g_aux_rect.w = 1
+    g_aux_rect.h = 6
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = centerX
+    g_aux_rect.y = centerY + 5
+    g_aux_rect.w = 1
+    g_aux_rect.h = 6
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn render_minimap() void = {
+    val scale: f32 = 0.075
+    val cell: f32 = (TILE_SIZE as f32) * scale
+    val mapSize: i32 = (MAP_SIZE as f32 * cell) as i32
+    val originX: i32 = SCREEN_WIDTH - mapSize - 24
+    val originY: i32 = 24
+
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+    trust SDL_SetRenderDrawColor(g_renderer, 6 as u8, 8 as u8, 12 as u8, 125 as u8)
+    g_aux_rect.x = originX - 8
+    g_aux_rect.y = originY - 8
+    g_aux_rect.w = mapSize + 16
+    g_aux_rect.h = mapSize + 16
     trust SDL_RenderFillRect(g_renderer, g_aux_rect)
 
-    trust SDL_SetRenderDrawColor(g_renderer, 0 as u8, 200 as u8, 0 as u8, 255 as u8)
-    val barW: i32 = playerHealth * 200 / 100
-    g_aux_rect.x = 20
-    g_aux_rect.y = SCREEN_HEIGHT - 40
-    g_aux_rect.w = barW
+    for y = 0, y < MAP_SIZE, y++ {
+        for x = 0, x < MAP_SIZE, x++ {
+            val cellValue: i32 = map_at(x, y)
+            if cellValue != 0 {
+                val r: mut u8 = 70
+                val g: mut u8 = 82
+                val b: mut u8 = 96
+                if cellValue == 2 {
+                    r = 112
+                    g = 96
+                    b = 78
+                } elif cellValue == 3 {
+                    r = 92
+                    g = 100
+                    b = 112
+                }
+                trust SDL_SetRenderDrawColor(g_renderer, r, g, b, 105 as u8)
+                g_aux_rect.x = originX + ((x as f32) * cell) as i32
+                g_aux_rect.y = originY + ((y as f32) * cell) as i32
+                g_aux_rect.w = cell as i32
+                g_aux_rect.h = cell as i32
+                trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+            }
+        }
+    }
+
+    for index = 0, index < MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref HealthPickup = pickup_at(index)
+        if pickup.active != 0 {
+            trust SDL_SetRenderDrawColor(g_renderer, 80 as u8, 235 as u8, 125 as u8, 210 as u8)
+            g_aux_rect.x = originX + (pickup.x * scale) as i32 - 2
+            g_aux_rect.y = originY + (pickup.y * scale) as i32 - 2
+            g_aux_rect.w = 4
+            g_aux_rect.h = 4
+            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+        }
+    }
+
+    for index = 0, index < MAX_ENEMIES, index++ {
+        val enemy: ref Enemy = get_enemy(index)
+        if enemy.alive != 0 {
+            trust SDL_SetRenderDrawColor(g_renderer, 235 as u8, 70 as u8, 70 as u8, 205 as u8)
+            g_aux_rect.x = originX + (enemy.x * scale) as i32 - 2
+            g_aux_rect.y = originY + (enemy.y * scale) as i32 - 2
+            g_aux_rect.w = 4
+            g_aux_rect.h = 4
+            trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+        }
+    }
+
+    trust SDL_SetRenderDrawColor(g_renderer, 120 as u8, 225 as u8, 255 as u8, 240 as u8)
+    g_aux_rect.x = originX + (player.x * scale) as i32 - 2
+    g_aux_rect.y = originY + (player.y * scale) as i32 - 2
+    g_aux_rect.w = 5
+    g_aux_rect.h = 5
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
+}
+
+fn render_hud() void = {
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 1 as i32)
+
+    trust SDL_SetRenderDrawColor(g_renderer, 8 as u8, 10 as u8, 14 as u8, 175 as u8)
+    g_aux_rect.x = 24
+    g_aux_rect.y = SCREEN_HEIGHT - 42
+    g_aux_rect.w = 212
     g_aux_rect.h = 20
     trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+
+    val healthR: mut u8 = 72
+    val healthG: mut u8 = 225
+    val healthB: mut u8 = 132
+    if playerHealth < 30 {
+        healthR = 242
+        healthG = 70
+        healthB = 70
+    } elif playerHealth < 60 {
+        healthR = 242
+        healthG = 184
+        healthB = 72
+    }
+
+    trust SDL_SetRenderDrawColor(g_renderer, healthR, healthG, healthB, 235 as u8)
+    g_aux_rect.x = 29
+    g_aux_rect.y = SCREEN_HEIGHT - 37
+    g_aux_rect.w = playerHealth * 202 / 100
+    g_aux_rect.h = 10
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+
+    g_aux_rect.x = 15
+    g_aux_rect.y = SCREEN_HEIGHT - 37
+    g_aux_rect.w = 4
+    g_aux_rect.h = 12
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+    g_aux_rect.x = 11
+    g_aux_rect.y = SCREEN_HEIGHT - 33
+    g_aux_rect.w = 12
+    g_aux_rect.h = 4
+    trust SDL_RenderFillRect(g_renderer, g_aux_rect)
+
+    trust SDL_SetRenderDrawBlendMode(g_renderer, 0 as i32)
 }
 
 fn load_texture(renderer: ref void, path: ref u8) ref void = trust {
@@ -1164,7 +1850,7 @@ pub fn main() i32 = {
         return 1
     }
 
-    trust SDL_Init(C.SDL_INIT_VIDEO)
+    trust SDL_Init(C.SDL_INIT_VIDEO | C.SDL_INIT_AUDIO)
     trust apply_spawn()
 
     val window: ref void = trust SDL_CreateWindow(
@@ -1182,6 +1868,33 @@ pub fn main() i32 = {
         C.SDL_RENDERER_ACCELERATED | C.SDL_RENDERER_PRESENTVSYNC
     )
     g_renderer = renderer
+    trust SDL_SetRelativeMouseMode(1 as i32)
+
+    trust Mix_OpenAudio(44100 as i32, C.AUDIO_S16SYS, 2 as i32, 1024 as i32)
+    g_shootSound = trust Mix_LoadWAV("sounds/shoot.wav")
+    g_enemyShootSound = trust Mix_LoadWAV("sounds/enemy_shoot.wav")
+    g_hitSound = trust Mix_LoadWAV("sounds/hit.wav")
+    g_hurtSound = trust Mix_LoadWAV("sounds/hurt.wav")
+    g_pickupSound = trust Mix_LoadWAV("sounds/pickup.wav")
+    g_footstepSound = trust Mix_LoadWAV("sounds/footstep.wav")
+    if g_shootSound != none {
+        trust Mix_VolumeChunk(g_shootSound, 55 as i32)
+    }
+    if g_enemyShootSound != none {
+        trust Mix_VolumeChunk(g_enemyShootSound, 32 as i32)
+    }
+    if g_hitSound != none {
+        trust Mix_VolumeChunk(g_hitSound, 48 as i32)
+    }
+    if g_hurtSound != none {
+        trust Mix_VolumeChunk(g_hurtSound, 78 as i32)
+    }
+    if g_pickupSound != none {
+        trust Mix_VolumeChunk(g_pickupSound, 62 as i32)
+    }
+    if g_footstepSound != none {
+        trust Mix_VolumeChunk(g_footstepSound, 26 as i32)
+    }
 
     zbuf = @alloc((SCREEN_WIDTH as usize) * 8)
     trust @memset(zbuf, 127, (SCREEN_WIDTH as usize) * 8)
@@ -1197,9 +1910,9 @@ pub fn main() i32 = {
     g_dst_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
     g_aux_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
 
-    trust load_wall_texture(renderer, "textures/QUAKE101/tech01_1.png", 0)
-    trust load_wall_texture(renderer, "textures/QUAKE101/stone1_3.png", 1)
-    trust load_wall_texture(renderer, "textures/QUAKE101/metal1_3.png", 2)
+    trust load_wall_texture(renderer, "textures/QUAKE101/tech08_2.png", 0)
+    trust load_wall_texture(renderer, "textures/QUAKE101/dung01_1.png", 1)
+    trust load_wall_texture(renderer, "textures/QUAKE101/tech07_2.png", 2)
 
     g_enemyTex = trust load_texture(renderer, "sprites/enemy.gif")
     if g_enemyTex != none {
@@ -1222,6 +1935,14 @@ pub fn main() i32 = {
         bulletTexH = bulletSize.h
     }
 
+    g_treeTex = trust load_texture(renderer, "sprites/tree.png")
+    g_healthTex = trust load_texture(renderer, "sprites/health.gif")
+
+    rng = trust SDL_GetTicks()
+    init_sky()
+    init_trees()
+    init_pickups()
+
     val quit: mut bool = false
     val evt: ref SDL_Event = @alloc(@sizeof(SDL_Event))
     val lastTime: mut u32 = trust SDL_GetTicks()
@@ -1231,6 +1952,7 @@ pub fn main() i32 = {
             val currentTime: u32 = trust SDL_GetTicks()
             val deltaTime: f32 = ((currentTime - lastTime) as f32) / 1000.0
             lastTime = currentTime
+            gameTime += deltaTime
 
             for {
                 if trust SDL_PollEvent(evt) != 0 {
@@ -1247,7 +1969,40 @@ pub fn main() i32 = {
             val keyD: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_D) * @sizeof(u8)))
             val keyW: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_W) * @sizeof(u8)))
             val keyS: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_S) * @sizeof(u8)))
-            val keySpace: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_SPACE) * @sizeof(u8)))
+            val keyShiftLeft: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_LSHIFT) * @sizeof(u8)))
+            val keyShiftRight: u8 = trust @load(@ptradd(
+                    keys,
+                    (C.SDL_SCANCODE_RSHIFT) * @sizeof(u8)
+                ))
+            val keyEscape: u8 = trust @load(@ptradd(keys, (C.SDL_SCANCODE_ESCAPE) * @sizeof(u8)))
+
+            if keyEscape != 0 {
+                quit = true
+            }
+
+            val mouseX: mut i32 = 0
+            val mouseY: mut i32 = 0
+            trust SDL_GetRelativeMouseState(@addr(mouseX), @addr(mouseY))
+            if mouseX != 0 {
+                trust rotate_player((mouseX as f32) * 0.0022)
+            }
+
+            val mouseScreenX: mut i32 = 0
+            val mouseScreenY: mut i32 = 0
+            val mouseButtons: u32 = trust SDL_GetMouseState(
+                @addr(mouseScreenX),
+                @addr(mouseScreenY)
+            )
+            if (mouseButtons & (C.SDL_BUTTON_LMASK as u32)) != 0 {
+                player_shoot()
+            }
+            pitch = pitch - (mouseY as f32) * 1.1
+            if pitch < -260.0 {
+                pitch = -260.0
+            }
+            if pitch > 260.0 {
+                pitch = 260.0
+            }
 
             if shootCooldown > 0.0 {
                 shootCooldown -= deltaTime
@@ -1259,29 +2014,33 @@ pub fn main() i32 = {
                 hitFlashTimer -= deltaTime
             }
 
-            val isMoving: bool = keyW != 0 || keyS != 0
+            val sprinting: bool = keyShiftLeft != 0 || keyShiftRight != 0
+            val isMoving: bool = keyW != 0 || keyS != 0 || keyA != 0 || keyD != 0
+            val bobRate: mut f32 = 1.0
+            if sprinting {
+                bobRate = 1.35
+            }
             if isMoving {
-                walkTime += deltaTime
+                walkTime += deltaTime * bobRate
+                footstepTimer -= deltaTime
+                if footstepTimer <= 0.0 {
+                    play_sound(g_footstepSound)
+                    if sprinting {
+                        footstepTimer = 0.29
+                    } else {
+                        footstepTimer = 0.42
+                    }
+                }
             } else {
                 walkTime = 0.0
+                footstepTimer = 0.0
             }
             val bobY: i32 = (trust sinf(walkTime * 7.0) * 16.0) as i32
             val bobX: i32 = (trust sinf(walkTime * 3.5) * 24.0) as i32
 
-            if keyA != 0 || keyD != 0 {
-                val rotDir: mut f32 = 1.0
-                if keyA != 0 {
-                    rotDir = -1.0
-                }
-                val rot: f32 = rotDir * player.rotSpeed * deltaTime
-
-                val oldDirX: f32 = player.dirX
-                player.dirX = player.dirX * trust cosf(rot) - player.dirY * trust sinf(rot)
-                player.dirY = oldDirX * trust sinf(rot) + player.dirY * trust cosf(rot)
-
-                val oldPlaneX: f32 = player.planeX
-                player.planeX = player.planeX * trust cosf(rot) - player.planeY * trust sinf(rot)
-                player.planeY = oldPlaneX * trust sinf(rot) + player.planeY * trust cosf(rot)
+            val movementSpeed: mut f32 = player.speed
+            if sprinting {
+                movementSpeed = player.speed * SPRINT_MULTIPLIER
             }
 
             if keyW != 0 || keyS != 0 {
@@ -1290,45 +2049,32 @@ pub fn main() i32 = {
                     moveDir = 1.0
                 }
 
-                val stepX: f32 = player.dirX * player.speed * moveDir * deltaTime
-                val stepY: f32 = player.dirY * player.speed * moveDir * deltaTime
-
-                val moveY0: i32 = ((player.y + 4.0) / (TILE_SIZE as f32)) as i32
-                val moveX0: i32 = ((player.x + 4.0 + stepX) / (TILE_SIZE as f32)) as i32
-                if map_at(moveX0, moveY0) == 0 {
-                    player.x += stepX
-                }
-
-                val moveY1: i32 = ((player.y + 4.0 + stepY) / (TILE_SIZE as f32)) as i32
-                val moveX1: i32 = ((player.x + 4.0) / (TILE_SIZE as f32)) as i32
-                if map_at(moveX1, moveY1) == 0 {
-                    player.y += stepY
-                }
+                val stepX: f32 = player.dirX * movementSpeed * moveDir * deltaTime
+                val stepY: f32 = player.dirY * movementSpeed * moveDir * deltaTime
+                try_move_player(stepX, stepY)
             }
 
-            if keySpace != 0 {
-                player_shoot()
+            if keyA != 0 || keyD != 0 {
+                val strafeDir: mut f32 = 1.0
+                if keyA != 0 {
+                    strafeDir = -1.0
+                }
+
+                val stepX: f32 = -player.dirY * movementSpeed * strafeDir * deltaTime
+                val stepY: f32 = player.dirX * movementSpeed * strafeDir * deltaTime
+                try_move_player(stepX, stepY)
             }
 
             update_enemies(deltaTime)
             update_bullets(deltaTime)
+            update_pickups(deltaTime)
 
             trust SDL_SetRenderDrawColor(renderer, 0 as u8, 0 as u8, 0 as u8, 255 as u8)
             trust SDL_RenderClear(renderer)
 
-            trust SDL_SetRenderDrawColor(renderer, 42 as u8, 46 as u8, 52 as u8, 255 as u8)
-            g_aux_rect.x = 0
-            g_aux_rect.y = 0
-            g_aux_rect.w = SCREEN_WIDTH
-            g_aux_rect.h = SCREEN_HEIGHT / 2
-            trust SDL_RenderFillRect(renderer, g_aux_rect)
-
-            trust SDL_SetRenderDrawColor(renderer, 30 as u8, 27 as u8, 24 as u8, 255 as u8)
-            g_aux_rect.x = 0
-            g_aux_rect.y = SCREEN_HEIGHT / 2
-            g_aux_rect.w = SCREEN_WIDTH
-            g_aux_rect.h = SCREEN_HEIGHT / 2
-            trust SDL_RenderFillRect(renderer, g_aux_rect)
+            val horizon: f32 = (SCREEN_HEIGHT as f32) / 2.0 + pitch
+            draw_sky(horizon, gameTime)
+            draw_ground(horizon)
 
             val pCX: f32 = player.x + 4.0
             val pCY: f32 = player.y + 4.0
@@ -1409,8 +2155,10 @@ pub fn main() i32 = {
 
                 trust @store(@ptradd(zbuf, (i as usize) * 8), (pWD * 100000.0) as usize)
 
-                val h: f32 = (SCREEN_HEIGHT as f32) / pWD
-                val intensity: f32 = 1.0 / (1.0 + pWD * pWD * 0.03)
+                val unitH: f32 = (SCREEN_HEIGHT as f32) / pWD
+                val wallH: f32 = unitH * (WALL_UNITS / (TILE_SIZE as f32))
+                val wallTop: f32 = horizon - wallH * 0.5
+                val intensity: f32 = 0.42 + 0.58 / (1.0 + pWD * pWD * 0.02)
                 val r: mut u8 = (255.0 * intensity) as u8
                 if side == 1 {
                     r = ((r as f32) * 0.7) as u8
@@ -1419,9 +2167,9 @@ pub fn main() i32 = {
                 val hitX: f32 = pCX + rayDX * pWD * (TILE_SIZE as f32)
                 val hitY: f32 = pCY + rayDY * pWD * (TILE_SIZE as f32)
 
-                val wallPos: mut f32 = hitX - ((mX as f32) * (TILE_SIZE as f32))
+                val wallPos: mut f32 = hitY - ((mY as f32) * (TILE_SIZE as f32))
                 if side == 1 {
-                    wallPos = hitY - ((mY as f32) * (TILE_SIZE as f32))
+                    wallPos = hitX - ((mX as f32) * (TILE_SIZE as f32))
                 }
                 wallPos = wallPos - (wallPos as i32) as f32
                 if wallPos < 0.0 {
@@ -1431,133 +2179,72 @@ pub fn main() i32 = {
                 val cellId: i32 = map_at(mX, mY)
                 val wall: ref WallTexture = wall_texture_for(cellId)
                 if wall.tex != none {
-                    val texX: i32 = (wallPos * (wall.w as f32)) as i32
+                    val texX: i32 = ((wallPos * CELL_TEX_REPEATS * (wall.w as f32)) as i32) % wall.w
                     if texX >= 0 && texX < wall.w {
                         trust SDL_SetTextureColorMod(wall.tex, r, r, r)
-
-                        g_src_rect.x = texX
-                        g_src_rect.y = 0
-                        g_src_rect.w = 1
-                        g_src_rect.h = wall.h
-
-                        g_dst_rect.x = i
-                        g_dst_rect.y = ((SCREEN_HEIGHT as f32 - h) / 2.0) as i32
-                        g_dst_rect.w = 1
-                        g_dst_rect.h = h as i32
-
-                        trust SDL_RenderCopy(
-                            g_renderer,
-                            wall.tex,
-                            g_src_rect as ref void,
-                            g_dst_rect as ref void
-                        )
+                        val segH: f32 = unitH * (TEX_WORLD_SIZE / (TILE_SIZE as f32))
+                        for segment = 0, segment < WALL_TEX_REPEATS, segment++ {
+                            val segTop: f32 = wallTop + segH * (segment as f32)
+                            val segBottom: f32 = segTop + segH
+                            val clipTop: mut f32 = segTop
+                            val clipBottom: mut f32 = segBottom
+                            if clipTop < 0.0 {
+                                clipTop = 0.0
+                            }
+                            if clipBottom > (SCREEN_HEIGHT as f32) {
+                                clipBottom = SCREEN_HEIGHT as f32
+                            }
+                            if clipBottom > clipTop {
+                                val srcTop: i32 = ((clipTop - segTop) / segH * (wall.h as f32)) as i32
+                                val srcHeight: mut i32 = ((clipBottom - clipTop) / segH * (wall.h as f32)) as i32
+                                if srcHeight < 1 {
+                                    srcHeight = 1
+                                }
+                                g_src_rect.x = texX
+                                g_src_rect.y = srcTop
+                                g_src_rect.w = 1
+                                g_src_rect.h = srcHeight
+                                g_dst_rect.x = i
+                                g_dst_rect.y = clipTop as i32
+                                g_dst_rect.w = 1
+                                g_dst_rect.h = (clipBottom - clipTop) as i32
+                                trust SDL_RenderCopy(
+                                    g_renderer,
+                                    wall.tex,
+                                    g_src_rect as ref void,
+                                    g_dst_rect as ref void
+                                )
+                            }
+                        }
                     }
                 } else {
                     trust SDL_SetRenderDrawColor(renderer, r, 0 as u8, 0 as u8, 255 as u8)
-                    g_aux_rect.x = i
-                    g_aux_rect.y = ((SCREEN_HEIGHT as f32 - h) / 2.0) as i32
-                    g_aux_rect.w = 1
-                    g_aux_rect.h = h as i32
-                    trust SDL_RenderFillRect(renderer, g_aux_rect)
+                    val clipTop: mut f32 = wallTop
+                    val clipBottom: mut f32 = wallTop + wallH
+                    if clipTop < 0.0 {
+                        clipTop = 0.0
+                    }
+                    if clipBottom > (SCREEN_HEIGHT as f32) {
+                        clipBottom = SCREEN_HEIGHT as f32
+                    }
+                    if clipBottom > clipTop {
+                        g_aux_rect.x = i
+                        g_aux_rect.y = clipTop as i32
+                        g_aux_rect.w = 1
+                        g_aux_rect.h = (clipBottom - clipTop) as i32
+                        trust SDL_RenderFillRect(renderer, g_aux_rect)
+                    }
                 }
 
                 i++
             }
 
-            val ms: f32 = 0.11
-            val mt: f32 = (TILE_SIZE as f32) * ms
-            val mar: f32 = 20.0
-
-            val y: mut i32 = 0
-            for y < MAP_SIZE {
-                val x: mut i32 = 0
-                for x < MAP_SIZE {
-                    if map_at(x, y) != 0 {
-                        trust SDL_SetRenderDrawColor(
-                            renderer,
-                            120 as u8,
-                            120 as u8,
-                            120 as u8,
-                            255 as u8
-                        )
-                        g_aux_rect.x = (mar + (x as f32) * mt) as i32
-                        g_aux_rect.y = (mar + (y as f32) * mt) as i32
-                        g_aux_rect.w = mt as i32
-                        g_aux_rect.h = mt as i32
-                        trust SDL_RenderFillRect(renderer, g_aux_rect)
-                    }
-                    x++
-                }
-                y++
-            }
-
-            trust SDL_SetRenderDrawColor(renderer, 255 as u8, 255 as u8, 0 as u8, 255 as u8)
-            g_aux_rect.x = (mar + player.x * ms - 4.0) as i32
-            g_aux_rect.y = (mar + player.y * ms - 4.0) as i32
-            g_aux_rect.w = 7
-            g_aux_rect.h = 7
-            trust SDL_RenderFillRect(renderer, g_aux_rect)
-
-            val mei: mut i32 = 0
-            for {
-                if mei < MAX_ENEMIES {
-                    val me: ref Enemy = get_enemy(mei)
-                    if me.alive != 0 {
-                        trust SDL_SetRenderDrawColor(
-                            renderer,
-                            255 as u8,
-                            0 as u8,
-                            0 as u8,
-                            255 as u8
-                        )
-                    } else {
-                        trust SDL_SetRenderDrawColor(
-                            renderer,
-                            60 as u8,
-                            60 as u8,
-                            60 as u8,
-                            255 as u8
-                        )
-                    }
-                    g_aux_rect.x = (mar + me.x * ms - 3.0) as i32
-                    g_aux_rect.y = (mar + me.y * ms - 3.0) as i32
-                    g_aux_rect.w = 6
-                    g_aux_rect.h = 6
-                    trust SDL_RenderFillRect(renderer, g_aux_rect)
-                    mei++
-                } else {
-                    break
-                }
-            }
-
-            render_sprites()
+            trust render_billboards()
             render_gun(bobX, bobY, muzzleFlashTimer > 0.0)
-
-            if hitFlashTimer > 0.0 {
-                trust SDL_SetRenderDrawColor(renderer, 200 as u8, 0 as u8, 0 as u8, 255 as u8)
-                g_aux_rect.x = 0
-                g_aux_rect.y = 0
-                g_aux_rect.w = SCREEN_WIDTH
-                g_aux_rect.h = 10
-                trust SDL_RenderFillRect(renderer, g_aux_rect)
-                g_aux_rect.x = 0
-                g_aux_rect.y = SCREEN_HEIGHT - 10
-                g_aux_rect.w = SCREEN_WIDTH
-                g_aux_rect.h = 10
-                trust SDL_RenderFillRect(renderer, g_aux_rect)
-                g_aux_rect.x = 0
-                g_aux_rect.y = 0
-                g_aux_rect.w = 10
-                g_aux_rect.h = SCREEN_HEIGHT
-                trust SDL_RenderFillRect(renderer, g_aux_rect)
-                g_aux_rect.x = SCREEN_WIDTH - 10
-                g_aux_rect.y = 0
-                g_aux_rect.w = 10
-                g_aux_rect.h = SCREEN_HEIGHT
-                trust SDL_RenderFillRect(renderer, g_aux_rect)
-            }
-
+            render_crosshair()
+            render_damage()
             render_hud()
+            render_minimap()
             trust SDL_RenderPresent(renderer)
 
         } else {
@@ -1565,6 +2252,26 @@ pub fn main() i32 = {
         }
     }
 
+    trust SDL_SetRelativeMouseMode(0 as i32)
+    if g_shootSound != none {
+        trust Mix_FreeChunk(g_shootSound)
+    }
+    if g_enemyShootSound != none {
+        trust Mix_FreeChunk(g_enemyShootSound)
+    }
+    if g_hitSound != none {
+        trust Mix_FreeChunk(g_hitSound)
+    }
+    if g_hurtSound != none {
+        trust Mix_FreeChunk(g_hurtSound)
+    }
+    if g_pickupSound != none {
+        trust Mix_FreeChunk(g_pickupSound)
+    }
+    if g_footstepSound != none {
+        trust Mix_FreeChunk(g_footstepSound)
+    }
+    trust Mix_CloseAudio()
     trust SDL_DestroyRenderer(renderer)
     trust SDL_DestroyWindow(window)
     trust SDL_Quit()
