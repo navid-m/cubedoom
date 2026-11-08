@@ -1,1 +1,4 @@
-spectre main.sx --alt --release --inc-path=/usr/include/SDL2/ -o cubedoom
+#!/usr/bin/env bash
+set -euo pipefail
+
+spectre build release

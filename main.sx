@@ -5,8 +5,13 @@ link "-lSDL2"
 link "-lSDL2_image"
 link "-lm"
 
-val MAP_SIZE: i32 = 20
+val fs  = use("std/fs")
+val str = use("std/string")
+val fmt = use("std/fmt")
+
+val MAP_SIZE: i32 = 32
 val TILE_SIZE: i32 = 64
+val MAP_PATH: ref u8 = "maps/cubedoom.map"
 val SCREEN_WIDTH: i32 = 1280
 val SCREEN_HEIGHT: i32 = 960
 val MAX_ENEMIES: i32 = 6
@@ -15,6 +20,7 @@ val ENEMY_SPEED: f32 = 50.0
 val BULLET_SPEED: f32 = 250.0
 val SHOOT_COOLDOWN_VAL: f32 = 0.4
 val ENEMY_SHOOT_INTERVAL: f32 = 2.0
+val PI: f32 = 3.14159265
 
 extern type SDL_Rect = {
     x: mut i32
@@ -57,6 +63,33 @@ extern type Bullet = {
     alive: mut i32
     isPlayer: mut i32
     animTime: mut f32
+}
+
+type WallTexture = {
+    tex: mut ref void
+    w: mut i32
+    h: mut i32
+}
+
+type TextureSize = {
+    w: mut i32
+    h: mut i32
+}
+
+type SpawnPoint = {
+    x: mut f32
+    y: mut f32
+}
+
+type BrushBounds = {
+    minX: mut f32
+    minY: mut f32
+    minZ: mut f32
+    maxX: mut f32
+    maxY: mut f32
+    maxZ: mut f32
+    hasFace: mut bool
+    texture: [128]u8
 }
 
 extern (C, header) fn SDL_Init(flags: u32) i32 = "SDL_Init"
@@ -127,28 +160,9 @@ extern (C) fn sinf(x: f32) f32 = "sinf"
 extern (C) fn fabsf(x: f32) f32 = "fabsf"
 extern (C) fn sqrtf(x: f32) f32 = "sqrtf"
 
-val map: mut [20][20]i32 = [
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,1,1,0,1,0,1,1,1,1,1,1,1,1,0,1,1,0,1],
-    [1,0,1,1,0,0,0,1,0,0,0,0,0,0,1,0,1,1,0,1],
-    [1,0,0,0,0,1,0,1,0,1,1,1,1,0,1,0,0,0,0,1],
-    [1,1,1,0,1,1,0,1,0,1,0,0,1,0,1,1,1,0,1,1],
-    [1,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1],
-    [1,0,1,1,1,1,1,1,0,1,0,0,1,1,1,1,1,1,0,1],
-    [1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
-    [1,0,1,0,1,1,0,1,1,0,0,1,1,0,1,1,0,1,0,1],
-    [1,0,0,0,1,1,0,1,1,0,0,1,1,0,1,1,0,0,0,1],
-    [1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
-    [1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1],
-    [1,0,0,0,0,1,0,1,0,0,0,0,1,0,1,0,0,0,0,1],
-    [1,0,1,1,0,0,0,1,0,1,1,0,1,0,0,0,1,1,0,1],
-    [1,0,1,1,0,1,1,1,0,1,1,0,1,1,1,0,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-]
+val map: mut [32][32]i32 = @zeroed
+val wallTextures: mut [3]WallTexture = @zeroed
+val enemySpawns: mut [6]SpawnPoint = @zeroed
 
 val player: mut Player = {
     x: 96.0,
@@ -168,6 +182,11 @@ val shootCooldown: mut f32 = 0.0
 val muzzleFlashTimer: mut f32 = 0.0
 val hitFlashTimer: mut f32 = 0.0
 val walkTime: mut f32 = 0.0
+val spawnX: mut f32 = 96.0
+val spawnY: mut f32 = 96.0
+val spawnAngle: mut f32 = 0.0
+val spawnFound: mut bool = false
+val enemySpawnCount: mut i32 = 0
 val enemies_buf: mut ref void = none
 val bullets_buf: mut ref void = none
 val zbuf: mut ref void = none
@@ -178,22 +197,481 @@ val gunTexH: mut i32 = 1
 val g_renderer: mut ref void = none
 val g_enemyTex: mut ref void = none
 val g_gunTex: mut ref void = none
-val g_wallTex: mut ref void = none
 val g_bulletTex: mut ref void = none
-val wallTexW: mut i32 = 1
-val wallTexH: mut i32 = 1
-val bulletTexW: mut i32 = 32
+val bulletTexW: mut i32 = 128
 val bulletTexH: mut i32 = 32
 val g_src_rect: mut ref SDL_Rect = none
 val g_dst_rect: mut ref SDL_Rect = none
 val g_aux_rect: mut ref SDL_Rect = none
 
 fn get_enemy(i: i32) mut ref Enemy = {
-    return trust @ptradd(enemies_buf, (i as usize) * @sizeof(Enemy)) as ref Enemy
+    return trust @ptradd(enemies_buf, (i as usize) * @sizeof(Enemy)) as mut ref Enemy
 }
 
 fn get_bullet(i: i32) mut ref Bullet = {
-    return trust @ptradd(bullets_buf, (i as usize) * @sizeof(Bullet)) as ref Bullet
+    return trust @ptradd(bullets_buf, (i as usize) * @sizeof(Bullet)) as mut ref Bullet
+}
+
+fn wall_texture(index: i32) mut ref WallTexture = {
+    return trust @ptradd(
+        wallTextures as ref WallTexture,
+        (index as usize) * @sizeof(WallTexture)
+    ) as mut ref WallTexture
+}
+
+fn enemy_spawn(index: i32) mut ref SpawnPoint = {
+    return trust @ptradd(
+        enemySpawns as ref SpawnPoint,
+        (index as usize) * @sizeof(SpawnPoint)
+    ) as mut ref SpawnPoint
+}
+
+fn map_at(x: i32, y: i32) i32 = {
+    if x < 0 || x >= MAP_SIZE || y < 0 || y >= MAP_SIZE {
+        return 1
+    }
+    return trust @load32(@ptradd(
+            map as ref i32,
+            ((y * MAP_SIZE + x) as usize) * @sizeof(i32)
+        ) as ref u32) as i32
+}
+
+fn map_set(x: i32, y: i32, value: i32) void = {
+    if x < 0 || x >= MAP_SIZE || y < 0 || y >= MAP_SIZE {
+        return
+    }
+    trust @store32(
+        @ptradd(map as ref i32, ((y * MAP_SIZE + x) as usize) * @sizeof(i32)) as ref u32,
+        value as u32
+    )
+}
+
+fn is_space(c: u8) bool = {
+    return c == 32 || c == 9 || c == 10 || c == 13
+}
+
+fn first_non_space(line: ref u8) i64 = trust {
+    val i: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || !is_space(c) {
+            return i
+        }
+        i++
+    }
+    return i
+}
+
+fn skip_spaces(line: ref u8, pos: i64) i64 = trust {
+    val i: mut i64 = pos
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || !is_space(c) {
+            break
+        }
+        i++
+    }
+    return i
+}
+
+fn read_number(line: ref u8, pos: mut ref i64) f32 = trust {
+    val i: mut i64 = @deref(pos)
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 {
+            break
+        }
+        if c == 45 || c == 43 || (c >= 48 && c <= 57) {
+            break
+        }
+        i++
+    }
+
+    val start: i64 = i
+    val first: u8 = @load8(@ptradd(line, i as usize))
+    if first == 45 || first == 43 {
+        i++
+    }
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if (c >= 48 && c <= 57) || c == 46 {
+            i++
+        } else {
+            break
+        }
+    }
+
+    @deref(pos) = i
+    val length: i64 = i - start
+    if length <= 0 {
+        return 0.0
+    }
+
+    val buffer: mut [64]u8 = @zeroed
+    @memcpy(buffer as ref void, @ptradd(line, start as usize), length as usize)
+    @store8(@ptradd(buffer as ref u8, length as usize), 0)
+
+    match fmt.string_to_f64(buffer as ref u8) {
+        ok value => {
+            return value as f32
+        }
+        err _ => {
+            return 0.0
+        }
+    }
+}
+
+fn read_quoted(line: ref u8, pos: mut ref i64, out: ref u8, capacity: i64) bool = trust {
+    val i: mut i64 = skip_spaces(line, @deref(pos))
+    if @load8(@ptradd(line, i as usize)) != 34 {
+        return false
+    }
+    i++
+    val start: i64 = i
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || c == 34 {
+            break
+        }
+        i++
+    }
+
+    val length: i64 = i - start
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(out as ref void, @ptradd(line, start as usize), count as usize)
+    }
+    @store8(@ptradd(out, count as usize), 0)
+    @deref(pos) = i
+    if @load8(@ptradd(line, i as usize)) == 34 {
+        @deref(pos) = i + 1
+    }
+    return true
+}
+
+fn read_token(line: ref u8, pos: mut ref i64, out: ref u8, capacity: i64) bool = trust {
+    val i: mut i64 = skip_spaces(line, @deref(pos))
+    val start: i64 = i
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || is_space(c) {
+            break
+        }
+        i++
+    }
+
+    val length: i64 = i - start
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(out as ref void, @ptradd(line, start as usize), count as usize)
+    }
+    @store8(@ptradd(out, count as usize), 0)
+    @deref(pos) = i
+    return true
+}
+
+fn copy_text(dst: ref u8, capacity: i64, src: ref u8) void = trust {
+    val length: i64 = str.len_raw(src)
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(dst as ref void, src as ref void, count as usize)
+    }
+    @store8(@ptradd(dst, count as usize), 0)
+}
+
+fn after_third_close_paren(line: ref u8) i64 = trust {
+    val closeCount: mut i32 = 0
+    val i: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 {
+            return i
+        }
+        if c == 41 {
+            closeCount++
+            if closeCount == 3 {
+                return i + 1
+            }
+        }
+        i++
+    }
+    return i
+}
+
+fn texture_id(name: ref u8) i32 = {
+    if str.str_eql(name, "quake/tech01_1") {
+        return 1
+    }
+    if str.str_eql(name, "quake/stone1_3") {
+        return 2
+    }
+    if str.str_eql(name, "quake/metal1_3") {
+        return 3
+    }
+    return 1
+}
+
+fn brush_reset(bounds: mut ref BrushBounds) void = trust {
+    bounds.minX = 1.0e30
+    bounds.minY = 1.0e30
+    bounds.minZ = 1.0e30
+    bounds.maxX = -1.0e30
+    bounds.maxY = -1.0e30
+    bounds.maxZ = -1.0e30
+    bounds.hasFace = false
+    @memset(@addr(bounds.texture) as ref void, 0, 128 as usize)
+}
+
+fn parse_face(line: ref u8, bounds: mut ref BrushBounds) void = trust {
+    val pos: mut i64 = 0
+    for point = 0, point < 3, point++ {
+        val x: f32 = read_number(line, @addr(pos))
+        val y: f32 = read_number(line, @addr(pos))
+        val z: f32 = read_number(line, @addr(pos))
+
+        if x < bounds.minX {
+            bounds.minX = x
+        }
+        if y < bounds.minY {
+            bounds.minY = y
+        }
+        if z < bounds.minZ {
+            bounds.minZ = z
+        }
+        if x > bounds.maxX {
+            bounds.maxX = x
+        }
+        if y > bounds.maxY {
+            bounds.maxY = y
+        }
+        if z > bounds.maxZ {
+            bounds.maxZ = z
+        }
+    }
+
+    bounds.hasFace = true
+    if @load8(bounds.texture as ref u8) == 0 {
+        val texturePos: mut i64 = after_third_close_paren(line)
+        read_token(line, @addr(texturePos), bounds.texture as ref u8, 128 as i64)
+    }
+}
+
+fn finish_brush(bounds: ref BrushBounds) void = trust {
+    if !bounds.hasFace {
+        return
+    }
+    if bounds.minZ > 4.0 || bounds.maxZ < 96.0 {
+        return
+    }
+
+    val id: i32 = texture_id(bounds.texture as ref u8)
+    val x0: i32 = (bounds.minX / (TILE_SIZE as f32)) as i32
+    val y0: i32 = (bounds.minY / (TILE_SIZE as f32)) as i32
+    val x1: i32 = (bounds.maxX / (TILE_SIZE as f32)) as i32
+    val y1: i32 = (bounds.maxY / (TILE_SIZE as f32)) as i32
+
+    for y = y0, y < y1, y++ {
+        for x = x0, x < x1, x++ {
+            map_set(x, y, id)
+        }
+    }
+}
+
+fn parse_property(
+    line: ref u8,
+    class_name: ref u8,
+    originX: mut ref f32,
+    originY: mut ref f32,
+    originZ: mut ref f32,
+    hasOrigin: mut ref bool,
+    entityAngle: mut ref f32
+) void = trust {
+    val pos: mut i64 = 0
+    val key: [64]u8 = @zeroed
+    val value: [256]u8 = @zeroed
+
+    if !read_quoted(line, @addr(pos), key as ref u8, 64 as i64) {
+        return
+    }
+    if !read_quoted(line, @addr(pos), value as ref u8, 256 as i64) {
+        return
+    }
+
+    if str.str_eql(key as ref u8, "classname") {
+        copy_text(class_name, 64 as i64, value as ref u8)
+    } elif str.str_eql(key as ref u8, "origin") {
+        val valuePos: mut i64 = 0
+        @deref(originX) = read_number(value as ref u8, @addr(valuePos))
+        @deref(originY) = read_number(value as ref u8, @addr(valuePos))
+        @deref(originZ) = read_number(value as ref u8, @addr(valuePos))
+        @deref(hasOrigin) = true
+    } elif str.str_eql(key as ref u8, "angle") {
+        val valuePos: mut i64 = 0
+        @deref(entityAngle) = read_number(value as ref u8, @addr(valuePos))
+    }
+}
+
+fn finish_entity(
+    class_name: ref u8,
+    hasOrigin: bool,
+    originX: f32,
+    originY: f32,
+    entityAngle: f32
+) void = trust {
+    if !hasOrigin {
+        return
+    }
+
+    if str.str_eql(class_name, "info_player_start") {
+        spawnX = originX
+        spawnY = originY
+        spawnAngle = entityAngle
+        spawnFound = true
+    } elif str.raw_starts_with(class_name, "monster_") {
+        if enemySpawnCount < MAX_ENEMIES {
+            val spawn: mut ref SpawnPoint = enemy_spawn(enemySpawnCount)
+            spawn.x = originX
+            spawn.y = originY
+            enemySpawnCount++
+        }
+    }
+}
+
+fn find_spawn() void = trust {
+    for y = 1, y < MAP_SIZE - 1, y++ {
+        for x = 1, x < MAP_SIZE - 1, x++ {
+            if map_at(x, y) == 0 {
+                spawnX = (x as f32) * (TILE_SIZE as f32) + (TILE_SIZE as f32) * 0.5
+                spawnY = (y as f32) * (TILE_SIZE as f32) + (TILE_SIZE as f32) * 0.5
+                spawnFound = true
+                return
+            }
+        }
+    }
+}
+
+fn load_map() bool = trust {
+    val handle = fs.open(MAP_PATH, "rb")
+    match handle {
+        none => {
+            return false
+        }
+        some file => {
+            val line: [2048]u8 = @zeroed
+            val class_name: mut [64]u8 = @zeroed
+            val bounds: mut BrushBounds = @zeroed
+            val depth: mut i32 = 0
+            val originX: mut f32 = 0.0
+            val originY: mut f32 = 0.0
+            val originZ: mut f32 = 0.0
+            val entityAngle: mut f32 = 0.0
+            val hasOrigin: mut bool = false
+
+            spawnFound = false
+            enemySpawnCount = 0
+
+            for fs.read_line(file, line as ref u8, 2048 as i64) {
+                val start: i64 = first_non_space(line as ref u8)
+                val c: u8 = @load8(@ptradd(line as ref u8, start as usize))
+
+                if c == 0 || c == 47 {
+                    continue
+                }
+
+                if c == 123 {
+                    depth++
+                    if depth == 1 {
+                        @memset(class_name as ref void, 0, 64 as usize)
+                        originX = 0.0
+                        originY = 0.0
+                        originZ = 0.0
+                        entityAngle = 0.0
+                        hasOrigin = false
+                    } elif depth == 2 {
+                        brush_reset(@addr(bounds))
+                    }
+                } elif c == 125 {
+                    if depth == 2 {
+                        finish_brush(@addr(bounds))
+                    } elif depth == 1 {
+                        finish_entity(
+                            class_name as ref u8,
+                            hasOrigin,
+                            originX,
+                            originY,
+                            entityAngle
+                        )
+                    }
+                    if depth > 0 {
+                        depth--
+                    }
+                } elif c == 40 {
+                    if depth == 2 {
+                        parse_face(line as ref u8, @addr(bounds))
+                    }
+                } elif c == 34 {
+                    if depth == 1 {
+                        parse_property(
+                            line as ref u8,
+                            class_name as ref u8,
+                            @addr(originX),
+                            @addr(originY),
+                            @addr(originZ),
+                            @addr(hasOrigin),
+                            @addr(entityAngle)
+                        )
+                    }
+                }
+            }
+
+            fs.close(file)
+            if !spawnFound {
+                find_spawn()
+            }
+            @print("cubedoom: loaded {s} with {d} enemy spawns\n", {MAP_PATH, enemySpawnCount})
+            return true
+        }
+    }
+}
+
+fn apply_spawn() void = trust {
+    player.x = spawnX - player.w * 0.5
+    player.y = spawnY - player.h * 0.5
+
+    val radians: f32 = spawnAngle * PI / 180.0
+    player.dirX = cosf(radians)
+    player.dirY = sinf(radians)
+    player.planeX = -player.dirY * 0.66
+    player.planeY = player.dirX * 0.66
+}
+
+fn init_enemies() void = trust {
+    for i = 0, i < MAX_ENEMIES, i++ {
+        val enemy: mut ref Enemy = get_enemy(i)
+        if i < enemySpawnCount {
+            val spawn: ref SpawnPoint = enemy_spawn(i)
+            enemy.x = spawn.x - 4.0
+            enemy.y = spawn.y - 4.0
+            enemy.health = 3
+            enemy.alive = 1
+            enemy.shootTimer = 1.5 + (i as f32) * 0.35
+        } else {
+            enemy.x = 0.0
+            enemy.y = 0.0
+            enemy.health = 0
+            enemy.alive = 0
+            enemy.shootTimer = 0.0
+        }
+    }
 }
 
 fn player_shoot() void = {
@@ -241,20 +719,16 @@ fn update_enemies(dt: f32) void = {
                 val newX: f32 = e.x + nx * ENEMY_SPEED * dt
                 val newY: f32 = e.y + ny * ENEMY_SPEED * dt
 
-                val tx: i32 = ((newX + 4.0) / 64.0) as i32
-                val ty: i32 = ((e.y + 4.0) / 64.0) as i32
-                if @get(map, ty, tx) is some v {
-                    if v == 0 {
-                        e.x = newX
-                    }
+                val tx: i32 = ((newX + 4.0) / (TILE_SIZE as f32)) as i32
+                val ty: i32 = ((e.y + 4.0) / (TILE_SIZE as f32)) as i32
+                if map_at(tx, ty) == 0 {
+                    e.x = newX
                 }
 
-                val tx2: i32 = ((e.x + 4.0) / 64.0) as i32
-                val ty2: i32 = ((newY + 4.0) / 64.0) as i32
-                if @get(map, ty2, tx2) is some v2 {
-                    if v2 == 0 {
-                        e.y = newY
-                    }
+                val tx2: i32 = ((e.x + 4.0) / (TILE_SIZE as f32)) as i32
+                val ty2: i32 = ((newY + 4.0) / (TILE_SIZE as f32)) as i32
+                if map_at(tx2, ty2) == 0 {
+                    e.y = newY
                 }
             }
 
@@ -299,22 +773,11 @@ fn update_bullets(dt: f32) void = {
             blt.y += blt.dy * dt
             blt.animTime += dt
 
-            val tx: i32 = (blt.x / 64.0) as i32
-            val ty: i32 = (blt.y / 64.0) as i32
+            val tx: i32 = (blt.x / (TILE_SIZE as f32)) as i32
+            val ty: i32 = (blt.y / (TILE_SIZE as f32)) as i32
             val hitWall: mut i32 = 0
-            if tx < 0 || tx >= MAP_SIZE || ty < 0 || ty >= MAP_SIZE {
+            if map_at(tx, ty) != 0 {
                 hitWall = 1
-            } else {
-                match @get(map, ty, tx) {
-                    some v => {
-                        if v > 0 {
-                            hitWall = 1
-                        }
-                    }
-                    none => {
-                        hitWall = 1
-                    }
-                }
             }
 
             if hitWall != 0 {
@@ -472,9 +935,9 @@ fn render_sprites() void = {
                     if bZscaled < bZdist {
                         if g_bulletTex != none {
                             val frame: i32 = ((blt.animTime * 8.0) as i32) % 4
-                            g_src_rect.x = frame * 32
+                            g_src_rect.x = frame * (bulletTexW / 4)
                             g_src_rect.y = 0
-                            g_src_rect.w = 32
+                            g_src_rect.w = bulletTexW / 4
                             g_src_rect.h = bulletTexH
 
                             g_dst_rect.x = bsX
@@ -552,9 +1015,9 @@ fn render_sprites() void = {
                     if pbZscaled < pbZdist {
                         if g_bulletTex != none {
                             val pframe: i32 = ((pblt.animTime * 8.0) as i32) % 4
-                            g_src_rect.x = pframe * 32
+                            g_src_rect.x = pframe * (bulletTexW / 4)
                             g_src_rect.y = 0
-                            g_src_rect.w = 32
+                            g_src_rect.w = bulletTexW / 4
                             g_src_rect.h = bulletTexH
 
                             g_dst_rect.x = pbsX
@@ -590,15 +1053,15 @@ fn render_sprites() void = {
     }
 }
 
-fn render_gun(bobY: i32, showFlash: bool) void = {
+fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = {
     if g_gunTex == none {
         return
     }
 
-    val gunW: i32 = SCREEN_WIDTH / 2
+    val gunW: i32 = SCREEN_WIDTH * 7 / 10
     val gunH: i32 = gunW * gunTexH / gunTexW
-    val gunX: i32 = (SCREEN_WIDTH - gunW) / 2
-    val gunY: i32 = SCREEN_HEIGHT - gunH + bobY + 24
+    val gunX: i32 = (SCREEN_WIDTH - gunW) / 2 + bobX
+    val gunY: i32 = SCREEN_HEIGHT - gunH + bobY + 20
 
     g_dst_rect.x = gunX
     g_dst_rect.y = gunY
@@ -607,9 +1070,9 @@ fn render_gun(bobY: i32, showFlash: bool) void = {
     trust SDL_RenderCopy(g_renderer, g_gunTex, none, g_dst_rect as ref void)
 
     if showFlash {
-        val flashSize: i32 = 90
-        val fX: i32 = (SCREEN_WIDTH - flashSize) / 2
-        val fY: i32 = gunY - flashSize / 2
+        val flashSize: i32 = 120
+        val fX: i32 = gunX + gunW / 2 - flashSize / 2
+        val fY: i32 = gunY - flashSize / 3
         trust SDL_SetRenderDrawColor(g_renderer, 255 as u8, 220 as u8, 50 as u8, 255 as u8)
         g_aux_rect.x = fX
         g_aux_rect.y = fY
@@ -642,8 +1105,67 @@ fn render_hud() void = {
     trust SDL_RenderFillRect(g_renderer, g_aux_rect)
 }
 
+fn load_texture(renderer: ref void, path: ref u8) ref void = trust {
+    val surface: ref void = IMG_Load(path)
+    if surface == none {
+        return none
+    }
+    val texture: ref void = SDL_CreateTextureFromSurface(renderer, surface)
+    SDL_FreeSurface(surface)
+    if texture != none {
+        SDL_SetTextureBlendMode(texture, 1 as i32)
+    }
+    return texture
+}
+
+fn texture_size(texture: ref void) TextureSize = trust {
+    val size: mut TextureSize = @zeroed
+    SDL_QueryTexture(
+        texture,
+        none as ref void,
+        none as ref void,
+        @addr(size.w) as ref void,
+        @addr(size.h) as ref void
+    )
+    if size.w < 1 {
+        size.w = 1
+    }
+    if size.h < 1 {
+        size.h = 1
+    }
+    return size
+}
+
+fn load_wall_texture(renderer: ref void, path: ref u8, index: i32) void = trust {
+    val texture: ref void = load_texture(renderer, path)
+    if texture == none {
+        return
+    }
+    val wall: mut ref WallTexture = wall_texture(index)
+    val size: TextureSize = texture_size(texture)
+    wall.tex = texture
+    wall.w = size.w
+    wall.h = size.h
+}
+
+fn wall_texture_for(id: i32) mut ref WallTexture = {
+    if id == 2 {
+        return wall_texture(1)
+    }
+    if id == 3 {
+        return wall_texture(2)
+    }
+    return wall_texture(0)
+}
+
 pub fn main() i32 = {
+    if !trust load_map() {
+        trust @print("cubedoom: could not load {s}\n", {MAP_PATH})
+        return 1
+    }
+
     trust SDL_Init(C.SDL_INIT_VIDEO)
+    trust apply_spawn()
 
     val window: ref void = trust SDL_CreateWindow(
         "cubedoom",
@@ -666,6 +1188,7 @@ pub fn main() i32 = {
 
     enemies_buf = @alloc((MAX_ENEMIES as usize) * @sizeof(Enemy))
     trust @memset(enemies_buf, 0, (MAX_ENEMIES as usize) * @sizeof(Enemy))
+    trust init_enemies()
 
     bullets_buf = @alloc((MAX_BULLETS as usize) * @sizeof(Bullet))
     trust @memset(bullets_buf, 0, (MAX_BULLETS as usize) * @sizeof(Bullet))
@@ -674,93 +1197,29 @@ pub fn main() i32 = {
     g_dst_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
     g_aux_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
 
-    val ep0: mut ref Enemy = get_enemy(0 as i32)
-    @deref(ep0) = {x: 544.0, y: 544.0, health: 3, alive: 1, shootTimer: 2.0}
-    val ep1: mut ref Enemy = get_enemy(1 as i32)
-    @deref(ep1) = {x: 992.0, y: 96.0,  health: 3, alive: 1, shootTimer: 2.5}
-    val ep2: mut ref Enemy = get_enemy(2 as i32)
-    @deref(ep2) = {x: 672.0, y: 864.0, health: 3, alive: 1, shootTimer: 1.5}
-    val ep3: mut ref Enemy = get_enemy(3 as i32)
-    @deref(ep3) = {x: 352.0, y: 416.0, health: 3, alive: 1, shootTimer: 3.0}
-    val ep4: mut ref Enemy = get_enemy(4 as i32)
-    @deref(ep4) = {x: 224.0, y: 864.0, health: 3, alive: 1, shootTimer: 2.0}
-    val ep5: mut ref Enemy = get_enemy(5 as i32)
-    @deref(ep5) = {x: 928.0, y: 416.0, health: 3, alive: 1, shootTimer: 1.8}
+    trust load_wall_texture(renderer, "textures/QUAKE101/tech01_1.png", 0)
+    trust load_wall_texture(renderer, "textures/QUAKE101/stone1_3.png", 1)
+    trust load_wall_texture(renderer, "textures/QUAKE101/metal1_3.png", 2)
 
-    val es: ref void = trust IMG_Load("sprites/enemy.gif")
-    if es != none {
-        g_enemyTex = trust SDL_CreateTextureFromSurface(renderer, es)
-        trust SDL_FreeSurface(es)
-        trust SDL_SetTextureBlendMode(g_enemyTex, 1 as i32)
-        val tw: ref void = @alloc(4)
-        val th: ref void = @alloc(4)
-        trust SDL_QueryTexture(g_enemyTex, none as ref void, none as ref void, tw, th)
-        enemyTexW = @load32(tw) as i32
-        enemyTexH = @load32(th) as i32
-        trust @free(tw)
-        trust @free(th)
-        if enemyTexW <= 0 {
-            enemyTexW = 1
-        }
-        if enemyTexH <= 0 {
-            enemyTexH = 1
-        }
+    g_enemyTex = trust load_texture(renderer, "sprites/enemy.gif")
+    if g_enemyTex != none {
+        val enemySize: TextureSize = trust texture_size(g_enemyTex)
+        enemyTexW = enemySize.w
+        enemyTexH = enemySize.h
     }
 
-    val gs: ref void = trust IMG_Load("sprites/centre_gun.png")
-    if gs != none {
-        g_gunTex = trust SDL_CreateTextureFromSurface(renderer, gs)
-        trust SDL_FreeSurface(gs)
-        trust SDL_SetTextureBlendMode(g_gunTex, 1 as i32)
-        val gw: ref void = @alloc(4)
-        val gh: ref void = @alloc(4)
-        trust SDL_QueryTexture(g_gunTex, none as ref void, none as ref void, gw, gh)
-        gunTexW = @load32(gw) as i32
-        gunTexH = @load32(gh) as i32
-        trust @free(gw)
-        trust @free(gh)
-        if gunTexW <= 0 {
-            gunTexW = 1
-        }
-        if gunTexH <= 0 {
-            gunTexH = 1
-        }
+    g_gunTex = trust load_texture(renderer, "sprites/centre_gun.png")
+    if g_gunTex != none {
+        val gunSize: TextureSize = trust texture_size(g_gunTex)
+        gunTexW = gunSize.w
+        gunTexH = gunSize.h
     }
 
-    val ws: ref void = trust IMG_Load("sprites/wall_texture.jpg")
-    if ws != none {
-        g_wallTex = trust SDL_CreateTextureFromSurface(renderer, ws)
-        trust SDL_FreeSurface(ws)
-        val ww: ref void = @alloc(4)
-        val wh: ref void = @alloc(4)
-        trust SDL_QueryTexture(g_wallTex, none as ref void, none as ref void, ww, wh)
-        wallTexW = @load32(ww) as i32
-        wallTexH = @load32(wh) as i32
-        trust @free(ww)
-        trust @free(wh)
-        if wallTexW <= 0 {
-            wallTexW = 1
-        }
-        if wallTexH <= 0 {
-            wallTexH = 1
-        }
-    }
-
-    val bs: ref void = trust IMG_Load("sprites/bullet.png")
-    if bs != none {
-        g_bulletTex = trust SDL_CreateTextureFromSurface(renderer, bs)
-        trust SDL_FreeSurface(bs)
-        trust SDL_SetTextureBlendMode(g_bulletTex, 1 as i32)
-        val bw: ref void = @alloc(4)
-        val bh: ref void = @alloc(4)
-        trust SDL_QueryTexture(g_bulletTex, none as ref void, none as ref void, bw, bh)
-        bulletTexW = 32
-        bulletTexH = @load32(bh) as i32
-        trust @free(bw)
-        trust @free(bh)
-        if bulletTexH <= 0 {
-            bulletTexH = 32
-        }
+    g_bulletTex = trust load_texture(renderer, "sprites/bullet.png")
+    if g_bulletTex != none {
+        val bulletSize: TextureSize = trust texture_size(g_bulletTex)
+        bulletTexW = bulletSize.w
+        bulletTexH = bulletSize.h
     }
 
     val quit: mut bool = false
@@ -806,7 +1265,8 @@ pub fn main() i32 = {
             } else {
                 walkTime = 0.0
             }
-            val bobY: i32 = (trust sinf(walkTime * 7.0) * 12.0) as i32
+            val bobY: i32 = (trust sinf(walkTime * 7.0) * 16.0) as i32
+            val bobX: i32 = (trust sinf(walkTime * 3.5) * 24.0) as i32
 
             if keyA != 0 || keyD != 0 {
                 val rotDir: mut f32 = 1.0
@@ -833,20 +1293,16 @@ pub fn main() i32 = {
                 val stepX: f32 = player.dirX * player.speed * moveDir * deltaTime
                 val stepY: f32 = player.dirY * player.speed * moveDir * deltaTime
 
-                val moveY0: i32 = ((player.y + 4.0) / 64.0) as i32
-                val moveX0: i32 = ((player.x + 4.0 + stepX) / 64.0) as i32
-                if @get(map, moveY0, moveX0) is some v {
-                    if v == 0 {
-                        player.x += stepX
-                    }
+                val moveY0: i32 = ((player.y + 4.0) / (TILE_SIZE as f32)) as i32
+                val moveX0: i32 = ((player.x + 4.0 + stepX) / (TILE_SIZE as f32)) as i32
+                if map_at(moveX0, moveY0) == 0 {
+                    player.x += stepX
                 }
 
-                val moveY1: i32 = ((player.y + 4.0 + stepY) / 64.0) as i32
-                val moveX1: i32 = ((player.x + 4.0) / 64.0) as i32
-                if @get(map, moveY1, moveX1) is some v {
-                    if v == 0 {
-                        player.y += stepY
-                    }
+                val moveY1: i32 = ((player.y + 4.0 + stepY) / (TILE_SIZE as f32)) as i32
+                val moveX1: i32 = ((player.x + 4.0) / (TILE_SIZE as f32)) as i32
+                if map_at(moveX1, moveY1) == 0 {
+                    player.y += stepY
                 }
             }
 
@@ -860,27 +1316,31 @@ pub fn main() i32 = {
             trust SDL_SetRenderDrawColor(renderer, 0 as u8, 0 as u8, 0 as u8, 255 as u8)
             trust SDL_RenderClear(renderer)
 
-            trust SDL_SetRenderDrawColor(renderer, 40 as u8, 40 as u8, 40 as u8, 255 as u8)
-            val ceiling: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-            @deref(ceiling) = {x: 0, y: 0, w: SCREEN_WIDTH, h: SCREEN_HEIGHT / 2}
-            trust SDL_RenderFillRect(renderer, ceiling)
+            trust SDL_SetRenderDrawColor(renderer, 42 as u8, 46 as u8, 52 as u8, 255 as u8)
+            g_aux_rect.x = 0
+            g_aux_rect.y = 0
+            g_aux_rect.w = SCREEN_WIDTH
+            g_aux_rect.h = SCREEN_HEIGHT / 2
+            trust SDL_RenderFillRect(renderer, g_aux_rect)
 
-            trust SDL_SetRenderDrawColor(renderer, 25 as u8, 25 as u8, 25 as u8, 255 as u8)
-            val floorRect: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-            @deref(floorRect) = {x: 0, y: SCREEN_HEIGHT / 2, w: SCREEN_WIDTH, h: SCREEN_HEIGHT / 2}
-            trust SDL_RenderFillRect(renderer, floorRect)
+            trust SDL_SetRenderDrawColor(renderer, 30 as u8, 27 as u8, 24 as u8, 255 as u8)
+            g_aux_rect.x = 0
+            g_aux_rect.y = SCREEN_HEIGHT / 2
+            g_aux_rect.w = SCREEN_WIDTH
+            g_aux_rect.h = SCREEN_HEIGHT / 2
+            trust SDL_RenderFillRect(renderer, g_aux_rect)
 
             val pCX: f32 = player.x + 4.0
             val pCY: f32 = player.y + 4.0
 
             val i: mut i32 = 0
             for i < SCREEN_WIDTH {
-                val cameraX: f32 = 2.0 * (i as f32) / 1280.0 - 1.0
+                val cameraX: f32 = 2.0 * (i as f32) / (SCREEN_WIDTH as f32) - 1.0
                 val rayDX: f32 = player.dirX + player.planeX * cameraX
                 val rayDY: f32 = player.dirY + player.planeY * cameraX
 
-                val mX: mut i32 = (pCX / 64.0) as i32
-                val mY: mut i32 = (pCY / 64.0) as i32
+                val mX: mut i32 = (pCX / (TILE_SIZE as f32)) as i32
+                val mY: mut i32 = (pCY / (TILE_SIZE as f32)) as i32
 
                 val dDX: mut f32 = trust fabsf(1.0 / rayDX)
                 if rayDX == 0.0 {
@@ -899,18 +1359,18 @@ pub fn main() i32 = {
 
                 if rayDX < 0.0 {
                     stepX = -1
-                    sDX = (pCX / 64.0 - (mX as f32)) * dDX
+                    sDX = (pCX / (TILE_SIZE as f32) - (mX as f32)) * dDX
                 } else {
                     stepX = 1
-                    sDX = ((mX as f32) + 1.0 - pCX / 64.0) * dDX
+                    sDX = ((mX as f32) + 1.0 - pCX / (TILE_SIZE as f32)) * dDX
                 }
 
                 if rayDY < 0.0 {
                     stepY = -1
-                    sDY = (pCY / 64.0 - (mY as f32)) * dDY
+                    sDY = (pCY / (TILE_SIZE as f32) - (mY as f32)) * dDY
                 } else {
                     stepY = 1
-                    sDY = ((mY as f32) + 1.0 - pCY / 64.0) * dDY
+                    sDY = ((mY as f32) + 1.0 - pCY / (TILE_SIZE as f32)) * dDY
                 }
 
                 val hit: mut i32 = 0
@@ -931,10 +1391,8 @@ pub fn main() i32 = {
                         if mX < 0 || mX >= MAP_SIZE || mY < 0 || mY >= MAP_SIZE {
                             break
                         }
-                        if @get(map, mY, mX) is some v {
-                            if v > 0 {
-                                hit = 1
-                            }
+                        if map_at(mX, mY) > 0 {
+                            hit = 1
                         }
                     } else {
                         break
@@ -951,89 +1409,82 @@ pub fn main() i32 = {
 
                 trust @store(@ptradd(zbuf, (i as usize) * 8), (pWD * 100000.0) as usize)
 
-                val h: f32 = 960.0 / pWD
+                val h: f32 = (SCREEN_HEIGHT as f32) / pWD
                 val intensity: f32 = 1.0 / (1.0 + pWD * pWD * 0.03)
                 val r: mut u8 = (255.0 * intensity) as u8
                 if side == 1 {
                     r = ((r as f32) * 0.7) as u8
                 }
 
-                val hitX: f32 = pCX + rayDX * pWD * 64.0
-                val hitY: f32 = pCY + rayDY * pWD * 64.0
+                val hitX: f32 = pCX + rayDX * pWD * (TILE_SIZE as f32)
+                val hitY: f32 = pCY + rayDY * pWD * (TILE_SIZE as f32)
 
-                val wallPos: mut f32 = hitX - ((mX as f32) * 64.0)
+                val wallPos: mut f32 = hitX - ((mX as f32) * (TILE_SIZE as f32))
                 if side == 1 {
-                    wallPos = hitY - ((mY as f32) * 64.0)
+                    wallPos = hitY - ((mY as f32) * (TILE_SIZE as f32))
                 }
                 wallPos = wallPos - (wallPos as i32) as f32
                 if wallPos < 0.0 {
                     wallPos += 1.0
                 }
 
-                if g_wallTex != none {
-                    val texX: i32 = (wallPos * (wallTexW as f32)) as i32
-                    if texX >= 0 && texX < wallTexW {
-                        trust SDL_SetTextureColorMod(g_wallTex, r, r, r)
+                val cellId: i32 = map_at(mX, mY)
+                val wall: ref WallTexture = wall_texture_for(cellId)
+                if wall.tex != none {
+                    val texX: i32 = (wallPos * (wall.w as f32)) as i32
+                    if texX >= 0 && texX < wall.w {
+                        trust SDL_SetTextureColorMod(wall.tex, r, r, r)
 
                         g_src_rect.x = texX
                         g_src_rect.y = 0
                         g_src_rect.w = 1
-                        g_src_rect.h = wallTexH
+                        g_src_rect.h = wall.h
 
                         g_dst_rect.x = i
-                        g_dst_rect.y = ((960.0 - h) / 2.0) as i32
+                        g_dst_rect.y = ((SCREEN_HEIGHT as f32 - h) / 2.0) as i32
                         g_dst_rect.w = 1
                         g_dst_rect.h = h as i32
 
                         trust SDL_RenderCopy(
                             g_renderer,
-                            g_wallTex,
+                            wall.tex,
                             g_src_rect as ref void,
                             g_dst_rect as ref void
                         )
                     }
                 } else {
                     trust SDL_SetRenderDrawColor(renderer, r, 0 as u8, 0 as u8, 255 as u8)
-
-                    val slice: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                    @deref(slice) = {
-                        x: i,
-                        y: ((960.0 - h) / 2.0) as i32,
-                        w: 1,
-                        h: h as i32
-                    }
-                    trust SDL_RenderFillRect(renderer, slice)
+                    g_aux_rect.x = i
+                    g_aux_rect.y = ((SCREEN_HEIGHT as f32 - h) / 2.0) as i32
+                    g_aux_rect.w = 1
+                    g_aux_rect.h = h as i32
+                    trust SDL_RenderFillRect(renderer, g_aux_rect)
                 }
 
                 i++
             }
 
-            val ms: f32 = 0.12
-            val mt: f32 = 64.0 * ms
+            val ms: f32 = 0.11
+            val mt: f32 = (TILE_SIZE as f32) * ms
             val mar: f32 = 20.0
 
             val y: mut i32 = 0
             for y < MAP_SIZE {
                 val x: mut i32 = 0
                 for x < MAP_SIZE {
-                    if @get(map, y, x) is some v {
-                        if v > 0 {
-                            trust SDL_SetRenderDrawColor(
-                                renderer,
-                                120 as u8,
-                                120 as u8,
-                                120 as u8,
-                                255 as u8
-                            )
-                            val w: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                            @deref(w) = {
-                                x: (mar + (x as f32) * mt) as i32,
-                                y: (mar + (y as f32) * mt) as i32,
-                                w: mt as i32,
-                                h: mt as i32
-                            }
-                            trust SDL_RenderFillRect(renderer, w)
-                        }
+                    if map_at(x, y) != 0 {
+                        trust SDL_SetRenderDrawColor(
+                            renderer,
+                            120 as u8,
+                            120 as u8,
+                            120 as u8,
+                            255 as u8
+                        )
+                        g_aux_rect.x = (mar + (x as f32) * mt) as i32
+                        g_aux_rect.y = (mar + (y as f32) * mt) as i32
+                        g_aux_rect.w = mt as i32
+                        g_aux_rect.h = mt as i32
+                        trust SDL_RenderFillRect(renderer, g_aux_rect)
                     }
                     x++
                 }
@@ -1041,14 +1492,11 @@ pub fn main() i32 = {
             }
 
             trust SDL_SetRenderDrawColor(renderer, 255 as u8, 255 as u8, 0 as u8, 255 as u8)
-            val mp: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-            @deref(mp) = {
-                x: (mar + player.x * ms - 4.0) as i32,
-                y: (mar + player.y * ms - 4.0) as i32,
-                w: 7,
-                h: 7
-            }
-            trust SDL_RenderFillRect(renderer, mp)
+            g_aux_rect.x = (mar + player.x * ms - 4.0) as i32
+            g_aux_rect.y = (mar + player.y * ms - 4.0) as i32
+            g_aux_rect.w = 7
+            g_aux_rect.h = 7
+            trust SDL_RenderFillRect(renderer, g_aux_rect)
 
             val mei: mut i32 = 0
             for {
@@ -1071,14 +1519,11 @@ pub fn main() i32 = {
                             255 as u8
                         )
                     }
-                    val meRect: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                    @deref(meRect) = {
-                        x: (mar + me.x * ms - 3.0) as i32,
-                        y: (mar + me.y * ms - 3.0) as i32,
-                        w: 6,
-                        h: 6
-                    }
-                    trust SDL_RenderFillRect(renderer, meRect)
+                    g_aux_rect.x = (mar + me.x * ms - 3.0) as i32
+                    g_aux_rect.y = (mar + me.y * ms - 3.0) as i32
+                    g_aux_rect.w = 6
+                    g_aux_rect.h = 6
+                    trust SDL_RenderFillRect(renderer, g_aux_rect)
                     mei++
                 } else {
                     break
@@ -1086,22 +1531,30 @@ pub fn main() i32 = {
             }
 
             render_sprites()
-            render_gun(bobY, muzzleFlashTimer > 0.0)
+            render_gun(bobX, bobY, muzzleFlashTimer > 0.0)
 
             if hitFlashTimer > 0.0 {
                 trust SDL_SetRenderDrawColor(renderer, 200 as u8, 0 as u8, 0 as u8, 255 as u8)
-                val ht: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                @deref(ht) = {x: 0, y: 0, w: SCREEN_WIDTH, h: 10}
-                trust SDL_RenderFillRect(renderer, ht)
-                val hb: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                @deref(hb) = {x: 0, y: SCREEN_HEIGHT - 10, w: SCREEN_WIDTH, h: 10}
-                trust SDL_RenderFillRect(renderer, hb)
-                val hl: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                @deref(hl) = {x: 0, y: 0, w: 10, h: SCREEN_HEIGHT}
-                trust SDL_RenderFillRect(renderer, hl)
-                val hr: mut ref SDL_Rect = @alloc(@sizeof(SDL_Rect))
-                @deref(hr) = {x: SCREEN_WIDTH - 10, y: 0, w: 10, h: SCREEN_HEIGHT}
-                trust SDL_RenderFillRect(renderer, hr)
+                g_aux_rect.x = 0
+                g_aux_rect.y = 0
+                g_aux_rect.w = SCREEN_WIDTH
+                g_aux_rect.h = 10
+                trust SDL_RenderFillRect(renderer, g_aux_rect)
+                g_aux_rect.x = 0
+                g_aux_rect.y = SCREEN_HEIGHT - 10
+                g_aux_rect.w = SCREEN_WIDTH
+                g_aux_rect.h = 10
+                trust SDL_RenderFillRect(renderer, g_aux_rect)
+                g_aux_rect.x = 0
+                g_aux_rect.y = 0
+                g_aux_rect.w = 10
+                g_aux_rect.h = SCREEN_HEIGHT
+                trust SDL_RenderFillRect(renderer, g_aux_rect)
+                g_aux_rect.x = SCREEN_WIDTH - 10
+                g_aux_rect.y = 0
+                g_aux_rect.w = 10
+                g_aux_rect.h = SCREEN_HEIGHT
+                trust SDL_RenderFillRect(renderer, g_aux_rect)
             }
 
             render_hud()

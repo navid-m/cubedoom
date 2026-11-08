@@ -1,16 +1,18 @@
 entry "main.sx"
-version "v0.0.2"
+version "v0.0.3"
 spectre_version "v0.0.15"
 
 build release {
-    flags "-release -inc-path:/usr/include/SDL2"
+    flags "-alt -release -dynamic -inc-path:/usr/include/SDL2"
     output "./cubedoom"
 }
 
 build dev {
-    output "./cubedoom-dev -inc-path:/usr/include/SDL2"
+    flags "-alt -dynamic -inc-path:/usr/include/SDL2"
+    output "./cubedoom-dev"
 }
 
 build alt {
-    output "./cubedoom-dev -alt -inc-path:/usr/include/SDL2"
+    flags "-alt -dynamic -inc-path:/usr/include/SDL2"
+    output "./cubedoom-dev"
 }
