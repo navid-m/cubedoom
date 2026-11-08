@@ -1,0 +1,30 @@
+val constants = use("../core/constants.sx")
+val mapmod    = use("../world/map.sx")
+val sdl       = use("../core/sdl.sx")
+val state     = use("../core/state.sx")
+
+pub fn rotate_player(angle: f32) void = trust {
+    val st: mut ref state.Game = state.game()
+    val oldDirX: f32 = st.player.dirX
+    st.player.dirX = st.player.dirX * sdl.cosf(angle) - st.player.dirY * sdl.sinf(angle)
+    st.player.dirY = oldDirX * sdl.sinf(angle) + st.player.dirY * sdl.cosf(angle)
+
+    val oldPlaneX: f32 = st.player.planeX
+    st.player.planeX = st.player.planeX * sdl.cosf(angle) - st.player.planeY * sdl.sinf(angle)
+    st.player.planeY = oldPlaneX * sdl.sinf(angle) + st.player.planeY * sdl.cosf(angle)
+}
+
+pub fn try_move_player(dx: f32, dy: f32) void = {
+    val st: mut ref state.Game = state.game()
+    val moveY0: i32 = ((st.player.y + 4.0) / (constants.TILE_SIZE as f32)) as i32
+    val moveX0: i32 = ((st.player.x + 4.0 + dx) / (constants.TILE_SIZE as f32)) as i32
+    if mapmod.map_at(moveX0, moveY0) == 0 {
+        st.player.x += dx
+    }
+
+    val moveY1: i32 = ((st.player.y + 4.0 + dy) / (constants.TILE_SIZE as f32)) as i32
+    val moveX1: i32 = ((st.player.x + 4.0) / (constants.TILE_SIZE as f32)) as i32
+    if mapmod.map_at(moveX1, moveY1) == 0 {
+        st.player.y += dy
+    }
+}

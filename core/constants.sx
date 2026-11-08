@@ -1,0 +1,75 @@
+pub val MAP_SIZE: i32 = 32
+
+pub val TILE_SIZE: i32 = 64
+
+pub val MAP_PATH: ref u8 = "maps/cubedoom.map"
+
+pub val PROGRESS_PATH: ref u8 = "progress.bin"
+
+pub val SCREEN_WIDTH: i32 = 1280
+
+pub val SCREEN_HEIGHT: i32 = 960
+
+pub val MAX_ENEMIES: i32 = 10
+
+pub val MAX_BULLETS: i32 = 96
+
+pub val MAX_XP_ORBS: i32 = 96
+
+pub val MAX_TREES: i32 = 20
+
+pub val MAX_HEALTH_PICKUPS: i32 = 6
+
+pub val MAX_BILLBOARDS: i32 = 320
+
+pub val MAX_STARS: i32 = 160
+
+pub val ENEMY_SPEED: f32 = 50.0
+
+pub val BULLET_SPEED: f32 = 250.0
+
+pub val SHOOT_COOLDOWN_VAL: f32 = 0.4
+
+pub val ENEMY_SHOOT_INTERVAL: f32 = 2.0
+
+pub val PI: f32 = 3.14159265
+
+pub val FOV_HALF: f32 = 0.5838
+
+pub val WALL_UNITS: f32 = 128.0
+
+pub val CELL_TEX_REPEATS: f32 = 1.0
+
+pub val WALL_TEX_REPEATS: i32 = 2
+
+pub val SPRINT_MULTIPLIER: f32 = 1.7
+
+pub val PROGRESS_MAGIC: u32 = 0x43554245
+
+pub val PROGRESS_VERSION: u32 = 1
+
+pub val PROGRESS_XOR: u32 = 0x5A17C0DE
+
+pub val STATE_MENU: i32 = 0
+
+pub val STATE_PLAYING: i32 = 1
+
+pub val STATE_SHOP: i32 = 2
+
+pub val STATE_DEAD: i32 = 3
+
+pub val STATE_PAUSED: i32 = 4
+
+pub val WEAPON_MACHINE_GUN: i32 = 0
+
+pub val WEAPON_SHOTGUN: i32 = 1
+
+pub val WEAPON_PLASMA: i32 = 2
+
+pub val MAX_HEALTH_LEVEL: i32 = 5
+
+pub val MAX_DAMAGE_LEVEL: i32 = 5
+
+pub val MAX_FIRE_RATE_LEVEL: i32 = 4
+
+pub val MAX_SPEED_LEVEL: i32 = 4

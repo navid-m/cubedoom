@@ -1,0 +1,338 @@
+val constants   = use("../core/constants.sx")
+val draw        = use("../core/draw.sx")
+val mapmod      = use("../world/map.sx")
+val progression = use("../core/progression.sx")
+val sdl         = use("../core/sdl.sx")
+val state       = use("../core/state.sx")
+val weapons     = use("../game/weapons.sx")
+
+pub fn render_gun(bobX: i32, bobY: i32, showFlash: bool) void = trust {
+    val st: mut ref state.Game = state.game()
+    val texture: ref void = weapons.current_gun_texture()
+    if texture == none {
+        return
+    }
+
+    val gunW: i32 = constants.SCREEN_WIDTH * 7 / 10
+    val gunH: i32 = gunW * st.gunTexH / st.gunTexW
+    val equip: f32 = st.weaponEquip
+    val lift: i32 = ((1.0 - equip) * (gunH as f32) * 0.92) as i32
+    val sway: i32 = (sdl.sinf(st.gameTime * 8.0) * (1.0 - equip) * 34.0) as i32
+    val gunX: i32 = (constants.SCREEN_WIDTH - gunW) / 2 + bobX + sway
+    val gunY: i32 = constants.SCREEN_HEIGHT - gunH + bobY + 20 + lift
+
+    st.g_dst_rect.x = gunX
+    st.g_dst_rect.y = gunY
+    st.g_dst_rect.w = gunW
+    st.g_dst_rect.h = gunH
+    sdl.SDL_RenderCopy(st.g_renderer, texture, none, st.g_dst_rect as ref void)
+
+    if showFlash {
+        val flashSize: i32 = 130
+        val fX: i32 = gunX + gunW / 2 - flashSize / 2
+        val fY: i32 = gunY - flashSize / 3
+        val fr: u8 = 255
+        val fg: mut u8 = 220
+        val fb: mut u8 = 50
+        if st.currentWeapon == constants.WEAPON_SHOTGUN {
+            fg = 168
+            fb = 54
+        } elif st.currentWeapon == constants.WEAPON_PLASMA {
+            fg = 210
+            fb = 255
+        }
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, fr, fg, fb, 255 as u8)
+        st.g_aux_rect.x = fX
+        st.g_aux_rect.y = fY
+        st.g_aux_rect.w = flashSize
+        st.g_aux_rect.h = flashSize
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, 255 as u8, 255 as u8, 220 as u8, 255 as u8)
+        st.g_aux_rect.x = fX + flashSize / 4
+        st.g_aux_rect.y = fY + flashSize / 4
+        st.g_aux_rect.w = flashSize / 2
+        st.g_aux_rect.h = flashSize / 2
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+
+        draw.draw_glow(
+            fX + flashSize / 2,
+            fY + flashSize / 2,
+            102,
+            fr,
+            fg,
+            fb,
+            105 as u8
+        )
+        draw.draw_flare_chain(fX + flashSize / 2, fY + flashSize / 2, 0.36)
+    }
+}
+
+pub fn render_damage() void = {
+    val st: mut ref state.Game = state.game()
+    if st.hitFlashTimer <= 0.0 {
+        return
+    }
+    val alpha: u8 = ((st.hitFlashTimer * 280.0) as i32) as u8
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    trust sdl.SDL_SetRenderDrawColor(st.g_renderer, 175 as u8, 20 as u8, 20 as u8, alpha)
+    st.g_aux_rect.x = 0
+    st.g_aux_rect.y = 0
+    st.g_aux_rect.w = constants.SCREEN_WIDTH
+    st.g_aux_rect.h = 22
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = 0
+    st.g_aux_rect.y = constants.SCREEN_HEIGHT - 22
+    st.g_aux_rect.w = constants.SCREEN_WIDTH
+    st.g_aux_rect.h = 22
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = 0
+    st.g_aux_rect.y = 0
+    st.g_aux_rect.w = 22
+    st.g_aux_rect.h = constants.SCREEN_HEIGHT
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = constants.SCREEN_WIDTH - 22
+    st.g_aux_rect.y = 0
+    st.g_aux_rect.w = 22
+    st.g_aux_rect.h = constants.SCREEN_HEIGHT
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn render_crosshair() void = {
+    val st: mut ref state.Game = state.game()
+    val centerX: i32 = constants.SCREEN_WIDTH / 2
+    val centerY: i32 = constants.SCREEN_HEIGHT / 2
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    trust sdl.SDL_SetRenderDrawColor(st.g_renderer, 235 as u8, 245 as u8, 255 as u8, 165 as u8)
+    st.g_aux_rect.x = centerX - 1
+    st.g_aux_rect.y = centerY - 1
+    st.g_aux_rect.w = 3
+    st.g_aux_rect.h = 3
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = centerX - 10
+    st.g_aux_rect.y = centerY
+    st.g_aux_rect.w = 6
+    st.g_aux_rect.h = 1
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = centerX + 5
+    st.g_aux_rect.y = centerY
+    st.g_aux_rect.w = 6
+    st.g_aux_rect.h = 1
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = centerX
+    st.g_aux_rect.y = centerY - 10
+    st.g_aux_rect.w = 1
+    st.g_aux_rect.h = 6
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = centerX
+    st.g_aux_rect.y = centerY + 5
+    st.g_aux_rect.w = 1
+    st.g_aux_rect.h = 6
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn render_minimap() void = {
+    val st: mut ref state.Game = state.game()
+    val scale: f32 = 0.075
+    val cell: f32 = (constants.TILE_SIZE as f32) * scale
+    val mapSize: i32 = (constants.MAP_SIZE as f32 * cell) as i32
+    val originX: i32 = constants.SCREEN_WIDTH - mapSize - 24
+    val originY: i32 = 24
+
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    trust sdl.SDL_SetRenderDrawColor(st.g_renderer, 6 as u8, 8 as u8, 12 as u8, 125 as u8)
+    st.g_aux_rect.x = originX - 8
+    st.g_aux_rect.y = originY - 8
+    st.g_aux_rect.w = mapSize + 16
+    st.g_aux_rect.h = mapSize + 16
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+
+    for y = 0, y < constants.MAP_SIZE, y++ {
+        for x = 0, x < constants.MAP_SIZE, x++ {
+            val cellValue: i32 = mapmod.map_at(x, y)
+            if cellValue != 0 {
+                val r: mut u8 = 70
+                val g: mut u8 = 82
+                val b: mut u8 = 96
+                if cellValue == 2 {
+                    r = 112
+                    g = 96
+                    b = 78
+                } elif cellValue == 3 {
+                    r = 92
+                    g = 100
+                    b = 112
+                }
+                trust sdl.SDL_SetRenderDrawColor(st.g_renderer, r, g, b, 105 as u8)
+                st.g_aux_rect.x = originX + ((x as f32) * cell) as i32
+                st.g_aux_rect.y = originY + ((y as f32) * cell) as i32
+                st.g_aux_rect.w = cell as i32
+                st.g_aux_rect.h = cell as i32
+                trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+            }
+        }
+    }
+
+    for index = 0, index < constants.MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref state.HealthPickup = state.pickup_at(index)
+        if pickup.active != 0 {
+            trust sdl.SDL_SetRenderDrawColor(
+                st.g_renderer,
+                80 as u8,
+                235 as u8,
+                125 as u8,
+                210 as u8
+            )
+            st.g_aux_rect.x = originX + (pickup.x * scale) as i32 - 2
+            st.g_aux_rect.y = originY + (pickup.y * scale) as i32 - 2
+            st.g_aux_rect.w = 4
+            st.g_aux_rect.h = 4
+            trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        }
+    }
+
+    for index = 0, index < constants.MAX_ENEMIES, index++ {
+        val enemy: ref state.Enemy = state.get_enemy(index)
+        if enemy.alive != 0 {
+            trust sdl.SDL_SetRenderDrawColor(
+                st.g_renderer,
+                235 as u8,
+                70 as u8,
+                70 as u8,
+                205 as u8
+            )
+            st.g_aux_rect.x = originX + (enemy.x * scale) as i32 - 2
+            st.g_aux_rect.y = originY + (enemy.y * scale) as i32 - 2
+            st.g_aux_rect.w = 4
+            st.g_aux_rect.h = 4
+            trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        }
+    }
+
+    trust sdl.SDL_SetRenderDrawColor(st.g_renderer, 120 as u8, 225 as u8, 255 as u8, 240 as u8)
+    st.g_aux_rect.x = originX + (st.player.x * scale) as i32 - 2
+    st.g_aux_rect.y = originY + (st.player.y * scale) as i32 - 2
+    st.g_aux_rect.w = 5
+    st.g_aux_rect.h = 5
+    trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn render_hud() void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, 8 as u8, 10 as u8, 14 as u8, 175 as u8)
+    st.g_aux_rect.x = 24
+    st.g_aux_rect.y = constants.SCREEN_HEIGHT - 42
+    st.g_aux_rect.w = 212
+    st.g_aux_rect.h = 20
+    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+
+    val healthR: mut u8 = 72
+    val healthG: mut u8 = 225
+    val healthB: mut u8 = 132
+    if st.playerHealth < 30 {
+        healthR = 242
+        healthG = 70
+        healthB = 70
+    } elif st.playerHealth < 60 {
+        healthR = 242
+        healthG = 184
+        healthB = 72
+    }
+
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, healthR, healthG, healthB, 235 as u8)
+    st.g_aux_rect.x = 29
+    st.g_aux_rect.y = constants.SCREEN_HEIGHT - 37
+    st.g_aux_rect.w = st.playerHealth * 202 / progression.max_health()
+    st.g_aux_rect.h = 10
+    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+
+    st.g_aux_rect.x = 15
+    st.g_aux_rect.y = constants.SCREEN_HEIGHT - 37
+    st.g_aux_rect.w = 4
+    st.g_aux_rect.h = 12
+    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    st.g_aux_rect.x = 11
+    st.g_aux_rect.y = constants.SCREEN_HEIGHT - 33
+    st.g_aux_rect.w = 12
+    st.g_aux_rect.h = 4
+    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+
+    draw.draw_text(28, 24, "WAVE", 3, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw.draw_int(112, 20, st.wave, 4, 255 as u8, 236 as u8, 154 as u8, 255 as u8)
+    draw.draw_text(28, 70, "LEFT", 2, 150 as u8, 165 as u8, 180 as u8, 255 as u8)
+    val left: mut i32 = st.waveTarget - st.waveKilled
+    if left < 0 {
+        left = 0
+    }
+    draw.draw_int(84, 66, left, 3, 220 as u8, 228 as u8, 238 as u8, 255 as u8)
+    draw.draw_text(28, 112, "XP", 2, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw.draw_int(66, 106, st.progress.xp, 3, 255 as u8, 218 as u8, 110 as u8, 255 as u8)
+
+    val wname: ref u8 = weapons.weapon_name(st.currentWeapon)
+    val wnameWidth: i32 = draw.text_width(wname, 3)
+    draw.draw_text(
+        constants.SCREEN_WIDTH - 28 - wnameWidth,
+        constants.SCREEN_HEIGHT - 58,
+        wname,
+        3,
+        220 as u8,
+        228 as u8,
+        238 as u8,
+        255 as u8
+    )
+    draw.draw_text(
+        constants.SCREEN_WIDTH - 28 - draw.text_width("1 2 3 SWITCH", 2),
+        constants.SCREEN_HEIGHT - 92,
+        "1 2 3 SWITCH",
+        2,
+        120 as u8,
+        132 as u8,
+        146 as u8,
+        255 as u8
+    )
+
+    if st.boothFound {
+        val bdx: f32 = st.boothX - (st.player.x + 4.0)
+        val bdy: f32 = st.boothY - (st.player.y + 4.0)
+        if bdx * bdx + bdy * bdy < 12000.0 {
+            draw.draw_glow(
+                constants.SCREEN_WIDTH / 2,
+                constants.SCREEN_HEIGHT - 170,
+                120,
+                255 as u8,
+                190 as u8,
+                64 as u8,
+                34 as u8
+            )
+            draw.draw_text_centered(
+                constants.SCREEN_WIDTH / 2,
+                constants.SCREEN_HEIGHT - 184,
+                "PRESS E TO OPEN UPGRADES",
+                3,
+                255 as u8,
+                222 as u8,
+                128 as u8,
+                255 as u8
+            )
+        }
+    }
+
+    if st.waveIntermission > 0.0 {
+        draw.draw_text_centered(
+            constants.SCREEN_WIDTH / 2,
+            190,
+            "WAVE CLEARED",
+            6,
+            255 as u8,
+            214 as u8,
+            92 as u8,
+            255 as u8
+        )
+    }
+}

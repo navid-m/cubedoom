@@ -1,0 +1,367 @@
+val audio       = use("../core/audio.sx")
+val constants   = use("../core/constants.sx")
+val entities    = use("../world/entities.sx")
+val mapmod      = use("../world/map.sx")
+val math        = use("../core/math.sx")
+val platform    = use("../core/platform.sx")
+val progression = use("../core/progression.sx")
+val sdl         = use("../core/sdl.sx")
+val state       = use("../core/state.sx")
+val weapons     = use("weapons.sx")
+
+pub fn spawn_xp_orb(x: f32, y: f32, value: i32) void = {
+    for i = 0, i < constants.MAX_XP_ORBS, i++ {
+        val orb: mut ref state.XpOrb = state.xp_orb_at(i)
+        if orb.active == 0 {
+            orb.x = x + (math.rand_unit() - 0.5) * 22.0
+            orb.y = y + (math.rand_unit() - 0.5) * 22.0
+            orb.value = value
+            orb.phase = math.rand_unit() * 2.0 * constants.PI
+            orb.active = 1
+            return
+        }
+    }
+}
+
+pub fn drop_enemy_xp(x: f32, y: f32) void = {
+    val st: ref state.Game = state.game()
+    val count: i32 = 2 + (math.rand_next() % 2) as i32
+    val value: i32 = 3 + st.wave
+    for i = 0, i < count, i++ {
+        spawn_xp_orb(x, y, value)
+    }
+}
+
+pub fn update_xp_orbs() void = {
+    val st: mut ref state.Game = state.game()
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+    for i = 0, i < constants.MAX_XP_ORBS, i++ {
+        val orb: mut ref state.XpOrb = state.xp_orb_at(i)
+        if orb.active != 0 {
+            val dx: f32 = orb.x - pCX
+            val dy: f32 = orb.y - pCY
+            if dx * dx + dy * dy < 900.0 {
+                orb.active = 0
+                st.progress.xp += orb.value
+                st.progress.totalXp += orb.value
+                audio.play_sound(st.g_xpSound)
+            }
+        }
+    }
+}
+
+pub fn spawn_wave_enemy() bool = {
+    val st: mut ref state.Game = state.game()
+    for i = 0, i < constants.MAX_ENEMIES, i++ {
+        val enemy: mut ref state.Enemy = state.get_enemy(i)
+        if enemy.alive == 0 {
+            val spawnXVal: mut f32 = st.spawnX
+            val spawnYVal: mut f32 = st.spawnY
+            if st.enemySpawnCount > 0 {
+                val pick: i32 = (math.rand_next() % (st.enemySpawnCount as u32)) as i32
+                val spawn: ref state.SpawnPoint = state.enemy_spawn(pick)
+                spawnXVal = spawn.x
+                spawnYVal = spawn.y
+            } else {
+                val attempts: mut i32 = 0
+                for attempts < 200 {
+                    val cellX: i32 = (math.rand_next() % ((constants.MAP_SIZE - 2) as u32)) as i32 + 1
+                    val cellY: i32 = (math.rand_next() % ((constants.MAP_SIZE - 2) as u32)) as i32 + 1
+                    if mapmod.map_at(cellX, cellY) == 0 {
+                        val testX: f32 = (cellX as f32) * (constants.TILE_SIZE as f32) + 32.0
+                        val testY: f32 = (cellY as f32) * (constants.TILE_SIZE as f32) + 32.0
+                        val dx: f32 = testX - (st.player.x + 4.0)
+                        val dy: f32 = testY - (st.player.y + 4.0)
+                        if dx * dx + dy * dy > 16000.0 {
+                            spawnXVal = testX
+                            spawnYVal = testY
+                            break
+                        }
+                    }
+                    attempts++
+                }
+            }
+            enemy.x = spawnXVal - 4.0
+            enemy.y = spawnYVal - 4.0
+            enemy.health = 3 + st.wave / 2 + st.wave / 5
+            enemy.alive = 1
+            enemy.shootTimer = 1.1 + math.rand_unit() * 1.6
+            st.waveSpawned++
+            return true
+        }
+    }
+    return false
+}
+
+pub fn start_wave() void = trust {
+    val st: mut ref state.Game = state.game()
+    st.waveTarget = 4 + st.wave * 2
+    st.waveKilled = 0
+    st.waveSpawned = 0
+    st.waveIntermission = 0.0
+    for i = 0, i < constants.MAX_ENEMIES, i++ {
+        state.get_enemy(i).alive = 0
+    }
+    if st.wave > 1 {
+        st.playerHealth += 15
+        if st.playerHealth > progression.max_health() {
+            st.playerHealth = progression.max_health()
+        }
+    }
+    if st.progress.bestWave < st.wave {
+        st.progress.bestWave = st.wave
+    }
+    progression.save_progress()
+    audio.play_sound(st.g_waveSound)
+
+    val initial: mut i32 = constants.MAX_ENEMIES
+    if st.waveTarget < initial {
+        initial = st.waveTarget
+    }
+    for i = 0, i < initial, i++ {
+        spawn_wave_enemy()
+    }
+}
+
+pub fn start_game() void = trust {
+    val st: mut ref state.Game = state.game()
+    st.gameState = constants.STATE_PLAYING
+    platform.set_relative_mouse(true)
+    st.playerHealth = progression.max_health()
+    mapmod.apply_spawn()
+    st.playerZ = 0.0
+    st.playerVZ = 0.0
+    st.onGround = true
+    st.wave = 1
+    st.waveIntermission = 0.0
+    st.currentWeapon = constants.WEAPON_MACHINE_GUN
+    st.weaponEquip = 0.0
+    st.shotgunReloadTimer = 0.0
+    st.shotgunReloadStage = 0
+    for i = 0, i < constants.MAX_BULLETS, i++ {
+        state.get_bullet(i).alive = 0
+    }
+    for i = 0, i < constants.MAX_XP_ORBS, i++ {
+        state.xp_orb_at(i).active = 0
+    }
+    entities.init_pickups()
+    audio.play_sound(st.g_switchMachineSound)
+    start_wave()
+}
+
+pub fn on_enemy_killed(x: f32, y: f32) void = {
+    val st: mut ref state.Game = state.game()
+    st.waveKilled++
+    drop_enemy_xp(x, y)
+    if st.waveKilled >= st.waveTarget {
+        st.waveIntermission = 3.0
+    }
+}
+
+pub fn update_wave(dt: f32) void = {
+    val st: mut ref state.Game = state.game()
+    if st.waveIntermission > 0.0 {
+        st.waveIntermission -= dt
+        if st.waveIntermission <= 0.0 {
+            st.wave++
+            trust start_wave()
+        }
+        return
+    }
+
+    val alive: mut i32 = 0
+    for i = 0, i < constants.MAX_ENEMIES, i++ {
+        if state.get_enemy(i).alive != 0 {
+            alive++
+        }
+    }
+    val remaining: i32 = st.waveTarget - st.waveSpawned
+    val slots: i32 = constants.MAX_ENEMIES - alive
+    if remaining > 0 && slots > 0 {
+        val count: mut i32 = remaining
+        if slots < count {
+            count = slots
+        }
+        for i = 0, i < count, i++ {
+            spawn_wave_enemy()
+        }
+    }
+}
+
+pub fn spawn_player_bullet(angleOffset: f32, damage: i32, speed: f32) void = {
+    val st: ref state.Game = state.game()
+    val cs: f32 = trust sdl.cosf(angleOffset)
+    val sn: f32 = trust sdl.sinf(angleOffset)
+    val dirX: f32 = st.player.dirX * cs - st.player.dirY * sn
+    val dirY: f32 = st.player.dirX * sn + st.player.dirY * cs
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+
+    val bi: mut i32 = 0
+    for bi < constants.MAX_BULLETS {
+        val blt: mut ref state.Bullet = state.get_bullet(bi)
+        if blt.alive == 0 {
+            blt.x = pCX
+            blt.y = pCY
+            blt.dx = dirX * speed
+            blt.dy = dirY * speed
+            blt.alive = 1
+            blt.isPlayer = 1
+            blt.animTime = 0.0
+            blt.damage = damage
+            blt.weapon = st.currentWeapon
+            break
+        }
+        bi++
+    }
+}
+
+pub fn player_shoot() void = {
+    val st: mut ref state.Game = state.game()
+    if st.shootCooldown > 0.0 || st.weaponEquip < 0.55 {
+        return
+    }
+    st.shootCooldown = weapons.weapon_cooldown(st.currentWeapon)
+    st.muzzleFlashTimer = 0.12
+    audio.play_sound(weapons.weapon_shoot_sound(st.currentWeapon))
+
+    if st.currentWeapon == constants.WEAPON_SHOTGUN {
+        for pellet = 0, pellet < 8, pellet++ {
+            val offset: f32 = ((pellet as f32) - 3.5) * 0.045
+            spawn_player_bullet(offset, 1 + st.progress.damageLevel, constants.BULLET_SPEED * 1.05)
+        }
+        st.shotgunReloadTimer = 0.90
+        st.shotgunReloadStage = 0
+    } elif st.currentWeapon == constants.WEAPON_PLASMA {
+        spawn_player_bullet(0.0, 2 + st.progress.damageLevel, constants.BULLET_SPEED * 1.45)
+    } else {
+        spawn_player_bullet(0.0, 1 + st.progress.damageLevel, constants.BULLET_SPEED * 1.15)
+    }
+}
+
+pub fn update_enemies(dt: f32) void = {
+    val st: ref state.Game = state.game()
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+
+    val ei: mut i32 = 0
+    for ei < constants.MAX_ENEMIES {
+        val e: mut ref state.Enemy = state.get_enemy(ei)
+        if e.alive != 0 {
+            val dx: f32 = pCX - (e.x + 4.0)
+            val dy: f32 = pCY - (e.y + 4.0)
+            val dist: f32 = trust sdl.sqrtf(dx * dx + dy * dy)
+
+            if dist > 80.0 && dist < 2000.0 {
+                val nx: f32 = dx / dist
+                val ny: f32 = dy / dist
+                val newX: f32 = e.x + nx * constants.ENEMY_SPEED * dt
+                val newY: f32 = e.y + ny * constants.ENEMY_SPEED * dt
+
+                val tx: i32 = ((newX + 4.0) / (constants.TILE_SIZE as f32)) as i32
+                val ty: i32 = ((e.y + 4.0) / (constants.TILE_SIZE as f32)) as i32
+                if mapmod.map_at(tx, ty) == 0 {
+                    e.x = newX
+                }
+
+                val tx2: i32 = ((e.x + 4.0) / (constants.TILE_SIZE as f32)) as i32
+                val ty2: i32 = ((newY + 4.0) / (constants.TILE_SIZE as f32)) as i32
+                if mapmod.map_at(tx2, ty2) == 0 {
+                    e.y = newY
+                }
+            }
+
+            e.shootTimer -= dt
+            if e.shootTimer <= 0.0 {
+                e.shootTimer = constants.ENEMY_SHOOT_INTERVAL + (ei as f32) * 0.3
+
+                val bi: mut i32 = 0
+                for bi < constants.MAX_BULLETS {
+                    val blt: mut ref state.Bullet = state.get_bullet(bi)
+                    if blt.alive == 0 {
+                        val bdx: f32 = pCX - (e.x + 4.0)
+                        val bdy: f32 = pCY - (e.y + 4.0)
+                        val bdist: f32 = trust sdl.sqrtf(bdx * bdx + bdy * bdy)
+                        if bdist > 0.0 {
+                            blt.x = e.x + 4.0
+                            blt.y = e.y + 4.0
+                            blt.dx = (bdx / bdist) * constants.BULLET_SPEED
+                            blt.dy = (bdy / bdist) * constants.BULLET_SPEED
+                            blt.alive = 1
+                            blt.isPlayer = 0
+                            blt.animTime = 0.0
+                            blt.damage = 10
+                            blt.weapon = 9
+                            audio.play_sound(st.g_enemyShootSound)
+                        }
+                        break
+                    }
+                    bi++
+                }
+            }
+        }
+        ei++
+    }
+}
+
+pub fn update_bullets(dt: f32) void = {
+    val st: mut ref state.Game = state.game()
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+    val bi: mut i32 = 0
+
+    for bi < constants.MAX_BULLETS {
+        val blt: mut ref state.Bullet = state.get_bullet(bi)
+        if blt.alive != 0 {
+            blt.x += blt.dx * dt
+            blt.y += blt.dy * dt
+            blt.animTime += dt
+
+            val tx: i32 = (blt.x / (constants.TILE_SIZE as f32)) as i32
+            val ty: i32 = (blt.y / (constants.TILE_SIZE as f32)) as i32
+            val hitWall: mut i32 = 0
+            if mapmod.map_at(tx, ty) != 0 {
+                hitWall = 1
+            }
+
+            if hitWall != 0 {
+                blt.alive = 0
+            } elif blt.isPlayer == 0 {
+                val pdx: f32 = blt.x - pCX
+                val pdy: f32 = blt.y - pCY
+                if pdx * pdx + pdy * pdy < 400.0 {
+                    st.playerHealth -= blt.damage
+                    blt.alive = 0
+                    if st.playerHealth < 0 {
+                        st.playerHealth = 0
+                    }
+                    st.hitFlashTimer = 0.2
+                    audio.play_sound(st.g_hurtSound)
+                }
+            } else {
+                val ei: mut i32 = 0
+                for ei < constants.MAX_ENEMIES {
+                    val e: mut ref state.Enemy = state.get_enemy(ei)
+                    if e.alive != 0 {
+                        val edx: f32 = (e.x + 4.0) - blt.x
+                        val edy: f32 = (e.y + 4.0) - blt.y
+                        val edist: f32 = trust sdl.sqrtf(edx * edx + edy * edy)
+                        if edist < 20.0 {
+                            e.health -= blt.damage
+                            if e.health <= 0 {
+                                e.alive = 0
+                                on_enemy_killed(e.x + 4.0, e.y + 4.0)
+                            }
+                            blt.alive = 0
+                            audio.play_sound(st.g_hitSound)
+                            break
+                        }
+                    }
+                    ei++
+                }
+            }
+        }
+        bi++
+    }
+}

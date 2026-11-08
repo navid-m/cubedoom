@@ -1,0 +1,11 @@
+val state = use("state.sx")
+
+pub fn rand_next() u32 = {
+    val st: mut ref state.Game = state.game()
+    st.rng = st.rng * 1664525 as u32 + 1013904223 as u32
+    return st.rng
+}
+
+pub fn rand_unit() f32 = {
+    return ((rand_next() % 10000) as f32) / 10000.0
+}

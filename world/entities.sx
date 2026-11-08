@@ -1,0 +1,181 @@
+val audio       = use("../core/audio.sx")
+val constants   = use("../core/constants.sx")
+val mapmod      = use("map.sx")
+val math        = use("../core/math.sx")
+val progression = use("../core/progression.sx")
+val state       = use("../core/state.sx")
+
+pub fn init_enemies() void = trust {
+    for i = 0, i < constants.MAX_ENEMIES, i++ {
+        val enemy: mut ref state.Enemy = state.get_enemy(i)
+        enemy.x = 0.0
+        enemy.y = 0.0
+        enemy.health = 0
+        enemy.alive = 0
+        enemy.shootTimer = 0.0
+    }
+}
+
+pub fn cell_has_enemy(cx: i32, cy: i32) bool = {
+    val st: ref state.Game = state.game()
+    for index = 0, index < st.enemySpawnCount, index++ {
+        val spawn: ref state.SpawnPoint = state.enemy_spawn(index)
+        if ((spawn.x / (constants.TILE_SIZE as f32)) as i32) == cx {
+            if ((spawn.y / (constants.TILE_SIZE as f32)) as i32) == cy {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+pub fn cell_near_spawn(cx: i32, cy: i32) bool = {
+    val st: ref state.Game = state.game()
+    val spawnCellX: i32 = (st.spawnX / (constants.TILE_SIZE as f32)) as i32
+    val spawnCellY: i32 = (st.spawnY / (constants.TILE_SIZE as f32)) as i32
+    val dx: i32 = cx - spawnCellX
+    val dy: i32 = cy - spawnCellY
+    return dx * dx + dy * dy < 25
+}
+
+pub fn cell_has_tree(cx: i32, cy: i32) bool = {
+    val st: ref state.Game = state.game()
+    for index = 0, index < st.treeCount, index++ {
+        val tree: ref state.Tree = state.tree_at(index)
+        if ((tree.x / (constants.TILE_SIZE as f32)) as i32) == cx {
+            if ((tree.y / (constants.TILE_SIZE as f32)) as i32) == cy {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+pub fn cell_near_pickup(count: i32, cx: i32, cy: i32) bool = {
+    for index = 0, index < count, index++ {
+        val pickup: ref state.HealthPickup = state.pickup_at(index)
+        val dx: i32 = cx - ((pickup.x / (constants.TILE_SIZE as f32)) as i32)
+        val dy: i32 = cy - ((pickup.y / (constants.TILE_SIZE as f32)) as i32)
+        if dx * dx + dy * dy < 16 {
+            return true
+        }
+    }
+    return false
+}
+
+pub fn init_trees() void = {
+    val st: mut ref state.Game = state.game()
+    st.treeCount = 0
+    for y = 1, y < constants.MAP_SIZE - 1, y++ {
+        for x = 1, x < constants.MAP_SIZE - 1, x++ {
+            if st.treeCount >= constants.MAX_TREES {
+                return
+            }
+            if mapmod.map_at(x, y) == 0 && !cell_near_spawn(x, y) && !cell_has_enemy(x, y) {
+                if math.rand_next() % 100 < 7 {
+                    val tree: mut ref state.Tree = state.tree_at(st.treeCount)
+                    tree.x = (x as f32) * (constants.TILE_SIZE as f32) + 32.0 + (math.rand_unit() * 20.0 - 10.0)
+                    tree.y = (y as f32) * (constants.TILE_SIZE as f32) + 32.0 + (math.rand_unit() * 20.0 - 10.0)
+                    tree.scale = 0.8 + math.rand_unit() * 0.45
+                    st.treeCount++
+                }
+            }
+        }
+    }
+}
+
+pub fn init_pickups() void = {
+    for index = 0, index < constants.MAX_HEALTH_PICKUPS, index++ {
+        val pickup: mut ref state.HealthPickup = state.pickup_at(index)
+        pickup.active = 0
+        pickup.respawn = 0.0
+        pickup.bob = math.rand_unit() * 2.0 * constants.PI
+
+        val attempts: mut i32 = 0
+        for attempts < 400 {
+            val x: i32 = (math.rand_next() % ((constants.MAP_SIZE - 2) as u32)) as i32 + 1
+            val y: i32 = (math.rand_next() % ((constants.MAP_SIZE - 2) as u32)) as i32 + 1
+            if mapmod.map_at(
+                x,
+                y
+            ) == 0 && !cell_near_spawn(
+                x,
+                y
+            ) && !cell_has_enemy(x, y) && !cell_has_tree(x, y) && !cell_near_pickup(index, x, y) {
+                pickup.x = (x as f32) * (constants.TILE_SIZE as f32) + 32.0
+                pickup.y = (y as f32) * (constants.TILE_SIZE as f32) + 32.0
+                pickup.active = 1
+                break
+            }
+            attempts++
+        }
+    }
+}
+
+pub fn init_booth() void = {
+    val st: mut ref state.Game = state.game()
+    st.boothFound = false
+    val spawnCellX: i32 = (st.spawnX / (constants.TILE_SIZE as f32)) as i32
+    val spawnCellY: i32 = (st.spawnY / (constants.TILE_SIZE as f32)) as i32
+
+    for radius = 2, radius < 12, radius++ {
+        for y = spawnCellY - radius, y <= spawnCellY + radius, y++ {
+            for x = spawnCellX - radius, x <= spawnCellX + radius, x++ {
+                val dx: i32 = x - spawnCellX
+                val dy: i32 = y - spawnCellY
+                val adx: mut i32 = dx
+                val ady: mut i32 = dy
+                if adx < 0 {
+                    adx = -adx
+                }
+                if ady < 0 {
+                    ady = -ady
+                }
+                if adx != radius && ady != radius {
+                    continue
+                }
+                if mapmod.map_at(
+                    x,
+                    y
+                ) == 0 && !cell_has_enemy(x, y) && !cell_has_tree(x, y) && !cell_near_pickup(
+                    constants.MAX_HEALTH_PICKUPS,
+                    x,
+                    y
+                ) {
+                    st.boothX = (x as f32) * (constants.TILE_SIZE as f32) + 32.0
+                    st.boothY = (y as f32) * (constants.TILE_SIZE as f32) + 32.0
+                    st.boothFound = true
+                    return
+                }
+            }
+        }
+    }
+}
+
+pub fn update_pickups(dt: f32) void = {
+    val st: mut ref state.Game = state.game()
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+
+    for index = 0, index < constants.MAX_HEALTH_PICKUPS, index++ {
+        val pickup: mut ref state.HealthPickup = state.pickup_at(index)
+        if pickup.active != 0 {
+            val dx: f32 = pickup.x - pCX
+            val dy: f32 = pickup.y - pCY
+            if dx * dx + dy * dy < 784.0 {
+                st.playerHealth += 25
+                if st.playerHealth > progression.max_health() {
+                    st.playerHealth = progression.max_health()
+                }
+                pickup.active = 0
+                pickup.respawn = 16.0
+                audio.play_sound(st.g_pickupSound)
+            }
+        } else {
+            pickup.respawn -= dt
+            if pickup.respawn <= 0.0 {
+                pickup.active = 1
+            }
+        }
+    }
+}

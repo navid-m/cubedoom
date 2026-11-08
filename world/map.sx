@@ -1,0 +1,442 @@
+val fs        = use("std/fs")
+val str       = use("std/string")
+val fmt       = use("std/fmt")
+val constants = use("../core/constants.sx")
+val sdl       = use("../core/sdl.sx")
+val state     = use("../core/state.sx")
+
+pub fn map_at(x: i32, y: i32) i32 = {
+    val st: ref state.Game = state.game()
+    if x < 0 || x >= constants.MAP_SIZE || y < 0 || y >= constants.MAP_SIZE {
+        return 1
+    }
+    return trust @load32(@ptradd(
+            st.map as ref i32,
+            ((y * constants.MAP_SIZE + x) as usize) * @sizeof(i32)
+        ) as ref u32) as i32
+}
+
+pub fn map_set(x: i32, y: i32, value: i32) void = {
+    val st: ref state.Game = state.game()
+    if x < 0 || x >= constants.MAP_SIZE || y < 0 || y >= constants.MAP_SIZE {
+        return
+    }
+    trust @store32(
+        @ptradd(
+            st.map as ref i32,
+            ((y * constants.MAP_SIZE + x) as usize) * @sizeof(i32)
+        ) as ref u32,
+        value as u32
+    )
+}
+
+pub fn is_space(c: u8) bool = {
+    return c == 32 || c == 9 || c == 10 || c == 13
+}
+
+pub fn first_non_space(line: ref u8) i64 = trust {
+    val i: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || !is_space(c) {
+            return i
+        }
+        i++
+    }
+    return i
+}
+
+pub fn skip_spaces(line: ref u8, pos: i64) i64 = trust {
+    val i: mut i64 = pos
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || !is_space(c) {
+            break
+        }
+        i++
+    }
+    return i
+}
+
+pub fn read_number(line: ref u8, pos: mut ref i64) f32 = trust {
+    val i: mut i64 = @deref(pos)
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 {
+            break
+        }
+        if c == 45 || c == 43 || (c >= 48 && c <= 57) {
+            break
+        }
+        i++
+    }
+
+    val start: i64 = i
+    val first: u8 = @load8(@ptradd(line, i as usize))
+    if first == 45 || first == 43 {
+        i++
+    }
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if (c >= 48 && c <= 57) || c == 46 {
+            i++
+        } else {
+            break
+        }
+    }
+
+    @deref(pos) = i
+    val length: i64 = i - start
+    if length <= 0 {
+        return 0.0
+    }
+
+    val buffer: mut [64]u8 = @zeroed
+    @memcpy(buffer as ref void, @ptradd(line, start as usize), length as usize)
+    @store8(@ptradd(buffer as ref u8, length as usize), 0)
+
+    match fmt.string_to_f64(buffer as ref u8) {
+        ok value => {
+            return value as f32
+        }
+        err _ => {
+            return 0.0
+        }
+    }
+}
+
+pub fn read_quoted(line: ref u8, pos: mut ref i64, out: ref u8, capacity: i64) bool = trust {
+    val i: mut i64 = skip_spaces(line, @deref(pos))
+    if @load8(@ptradd(line, i as usize)) != 34 {
+        return false
+    }
+    i++
+    val start: i64 = i
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || c == 34 {
+            break
+        }
+        i++
+    }
+
+    val length: i64 = i - start
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(out as ref void, @ptradd(line, start as usize), count as usize)
+    }
+    @store8(@ptradd(out, count as usize), 0)
+    @deref(pos) = i
+    if @load8(@ptradd(line, i as usize)) == 34 {
+        @deref(pos) = i + 1
+    }
+    return true
+}
+
+pub fn read_token(line: ref u8, pos: mut ref i64, out: ref u8, capacity: i64) bool = trust {
+    val i: mut i64 = skip_spaces(line, @deref(pos))
+    val start: i64 = i
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 || is_space(c) {
+            break
+        }
+        i++
+    }
+
+    val length: i64 = i - start
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(out as ref void, @ptradd(line, start as usize), count as usize)
+    }
+    @store8(@ptradd(out, count as usize), 0)
+    @deref(pos) = i
+    return true
+}
+
+pub fn copy_text(dst: ref u8, capacity: i64, src: ref u8) void = trust {
+    val length: i64 = str.len_raw(src)
+    val count: mut i64 = length
+    if count > capacity - 1 {
+        count = capacity - 1
+    }
+    if count > 0 {
+        @memcpy(dst as ref void, src as ref void, count as usize)
+    }
+    @store8(@ptradd(dst, count as usize), 0)
+}
+
+pub fn after_third_close_paren(line: ref u8) i64 = trust {
+    val closeCount: mut i32 = 0
+    val i: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(line, i as usize))
+        if c == 0 {
+            return i
+        }
+        if c == 41 {
+            closeCount++
+            if closeCount == 3 {
+                return i + 1
+            }
+        }
+        i++
+    }
+    return i
+}
+
+pub fn texture_id(name: ref u8) i32 = {
+    if str.str_eql(name, "quake/tech08_2") {
+        return 1
+    }
+    if str.str_eql(name, "quake/dung01_1") {
+        return 2
+    }
+    if str.str_eql(name, "quake/tech07_2") {
+        return 3
+    }
+    return 1
+}
+
+pub fn brush_reset(bounds: mut ref state.BrushBounds) void = trust {
+    bounds.minX = 1.0e30
+    bounds.minY = 1.0e30
+    bounds.minZ = 1.0e30
+    bounds.maxX = -1.0e30
+    bounds.maxY = -1.0e30
+    bounds.maxZ = -1.0e30
+    bounds.hasFace = false
+    @memset(@addr(bounds.texture) as ref void, 0, 128 as usize)
+}
+
+pub fn parse_face(line: ref u8, bounds: mut ref state.BrushBounds) void = trust {
+    val pos: mut i64 = 0
+    for point = 0, point < 3, point++ {
+        val x: f32 = read_number(line, @addr(pos))
+        val y: f32 = read_number(line, @addr(pos))
+        val z: f32 = read_number(line, @addr(pos))
+
+        if x < bounds.minX {
+            bounds.minX = x
+        }
+        if y < bounds.minY {
+            bounds.minY = y
+        }
+        if z < bounds.minZ {
+            bounds.minZ = z
+        }
+        if x > bounds.maxX {
+            bounds.maxX = x
+        }
+        if y > bounds.maxY {
+            bounds.maxY = y
+        }
+        if z > bounds.maxZ {
+            bounds.maxZ = z
+        }
+    }
+
+    bounds.hasFace = true
+    if @load8(bounds.texture as ref u8) == 0 {
+        val texturePos: mut i64 = after_third_close_paren(line)
+        read_token(line, @addr(texturePos), bounds.texture as ref u8, 128 as i64)
+    }
+}
+
+pub fn finish_brush(bounds: ref state.BrushBounds) void = trust {
+    if !bounds.hasFace {
+        return
+    }
+    if bounds.minZ > 4.0 || bounds.maxZ < 96.0 {
+        return
+    }
+
+    val id: i32 = texture_id(bounds.texture as ref u8)
+    val x0: i32 = (bounds.minX / (constants.TILE_SIZE as f32)) as i32
+    val y0: i32 = (bounds.minY / (constants.TILE_SIZE as f32)) as i32
+    val x1: i32 = (bounds.maxX / (constants.TILE_SIZE as f32)) as i32
+    val y1: i32 = (bounds.maxY / (constants.TILE_SIZE as f32)) as i32
+
+    for y = y0, y < y1, y++ {
+        for x = x0, x < x1, x++ {
+            map_set(x, y, id)
+        }
+    }
+}
+
+pub fn parse_property(
+    line: ref u8,
+    class_name: ref u8,
+    originX: mut ref f32,
+    originY: mut ref f32,
+    originZ: mut ref f32,
+    hasOrigin: mut ref bool,
+    entityAngle: mut ref f32
+) void = trust {
+    val pos: mut i64 = 0
+    val key: [64]u8 = @zeroed
+    val value: [256]u8 = @zeroed
+
+    if !read_quoted(line, @addr(pos), key as ref u8, 64 as i64) {
+        return
+    }
+    if !read_quoted(line, @addr(pos), value as ref u8, 256 as i64) {
+        return
+    }
+
+    if str.str_eql(key as ref u8, "classname") {
+        copy_text(class_name, 64 as i64, value as ref u8)
+    } elif str.str_eql(key as ref u8, "origin") {
+        val valuePos: mut i64 = 0
+        @deref(originX) = read_number(value as ref u8, @addr(valuePos))
+        @deref(originY) = read_number(value as ref u8, @addr(valuePos))
+        @deref(originZ) = read_number(value as ref u8, @addr(valuePos))
+        @deref(hasOrigin) = true
+    } elif str.str_eql(key as ref u8, "angle") {
+        val valuePos: mut i64 = 0
+        @deref(entityAngle) = read_number(value as ref u8, @addr(valuePos))
+    }
+}
+
+pub fn finish_entity(
+    class_name: ref u8,
+    hasOrigin: bool,
+    originX: f32,
+    originY: f32,
+    entityAngle: f32
+) void = trust {
+    val st: mut ref state.Game = state.game()
+    if !hasOrigin {
+        return
+    }
+
+    if str.str_eql(class_name, "info_player_start") {
+        st.spawnX = originX
+        st.spawnY = originY
+        st.spawnAngle = entityAngle
+        st.spawnFound = true
+    } elif str.raw_starts_with(class_name, "monster_") {
+        if st.enemySpawnCount < constants.MAX_ENEMIES {
+            val spawn: mut ref state.SpawnPoint = state.enemy_spawn(st.enemySpawnCount)
+            spawn.x = originX
+            spawn.y = originY
+            st.enemySpawnCount++
+        }
+    }
+}
+
+pub fn find_spawn() void = trust {
+    val st: mut ref state.Game = state.game()
+    for y = 1, y < constants.MAP_SIZE - 1, y++ {
+        for x = 1, x < constants.MAP_SIZE - 1, x++ {
+            if map_at(x, y) == 0 {
+                st.spawnX = (x as f32) * (constants.TILE_SIZE as f32) + (constants.TILE_SIZE as f32) * 0.5
+                st.spawnY = (y as f32) * (constants.TILE_SIZE as f32) + (constants.TILE_SIZE as f32) * 0.5
+                st.spawnFound = true
+                return
+            }
+        }
+    }
+}
+
+pub fn load_map() bool = trust {
+    val st: mut ref state.Game = state.game()
+    val handle = fs.open(constants.MAP_PATH, "rb")
+    match handle {
+        none => {
+            return false
+        }
+        some file => {
+            val line: [2048]u8 = @zeroed
+            val class_name: mut [64]u8 = @zeroed
+            val bounds: mut state.BrushBounds = @zeroed
+            val depth: mut i32 = 0
+            val originX: mut f32 = 0.0
+            val originY: mut f32 = 0.0
+            val originZ: mut f32 = 0.0
+            val entityAngle: mut f32 = 0.0
+            val hasOrigin: mut bool = false
+
+            st.spawnFound = false
+            st.enemySpawnCount = 0
+
+            for fs.read_line(file, line as ref u8, 2048 as i64) {
+                val start: i64 = first_non_space(line as ref u8)
+                val c: u8 = @load8(@ptradd(line as ref u8, start as usize))
+
+                if c == 0 || c == 47 {
+                    continue
+                }
+
+                if c == 123 {
+                    depth++
+                    if depth == 1 {
+                        @memset(class_name as ref void, 0, 64 as usize)
+                        originX = 0.0
+                        originY = 0.0
+                        originZ = 0.0
+                        entityAngle = 0.0
+                        hasOrigin = false
+                    } elif depth == 2 {
+                        brush_reset(@addr(bounds))
+                    }
+                } elif c == 125 {
+                    if depth == 2 {
+                        finish_brush(@addr(bounds))
+                    } elif depth == 1 {
+                        finish_entity(
+                            class_name as ref u8,
+                            hasOrigin,
+                            originX,
+                            originY,
+                            entityAngle
+                        )
+                    }
+                    if depth > 0 {
+                        depth--
+                    }
+                } elif c == 40 {
+                    if depth == 2 {
+                        parse_face(line as ref u8, @addr(bounds))
+                    }
+                } elif c == 34 {
+                    if depth == 1 {
+                        parse_property(
+                            line as ref u8,
+                            class_name as ref u8,
+                            @addr(originX),
+                            @addr(originY),
+                            @addr(originZ),
+                            @addr(hasOrigin),
+                            @addr(entityAngle)
+                        )
+                    }
+                }
+            }
+
+            fs.close(file)
+            if !st.spawnFound {
+                find_spawn()
+            }
+            return true
+        }
+    }
+}
+
+pub fn apply_spawn() void = trust {
+    val st: mut ref state.Game = state.game()
+    st.player.x = st.spawnX - st.player.w * 0.5
+    st.player.y = st.spawnY - st.player.h * 0.5
+
+    val radians: f32 = st.spawnAngle * constants.PI / 180.0
+    st.player.dirX = sdl.cosf(radians)
+    st.player.dirY = sdl.sinf(radians)
+    st.player.planeX = -st.player.dirY * 0.66
+    st.player.planeY = st.player.dirX * 0.66
+}

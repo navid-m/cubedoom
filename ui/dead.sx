@@ -1,0 +1,105 @@
+val audio       = use("../core/audio.sx")
+val constants   = use("../core/constants.sx")
+val draw        = use("../core/draw.sx")
+val platform    = use("../core/platform.sx")
+val progression = use("../core/progression.sx")
+val sdl         = use("../core/sdl.sx")
+val state       = use("../core/state.sx")
+
+pub fn update_dead() void = trust {
+    val st: mut ref state.Game = state.game()
+    if st.inputClick || st.inputEnterPressed || st.inputEPressed || st.inputEscapePressed {
+        audio.play_sound(st.g_clickSound)
+        st.gameState = constants.STATE_MENU
+        platform.set_relative_mouse(false)
+    }
+}
+
+pub fn enter_death() void = trust {
+    val st: mut ref state.Game = state.game()
+    st.gameState = constants.STATE_DEAD
+    platform.set_relative_mouse(false)
+    progression.save_progress()
+    audio.play_sound(st.g_deathSound)
+}
+
+pub fn render_dead() void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, 12 as u8, 2 as u8, 3 as u8, 255 as u8)
+    sdl.SDL_RenderClear(st.g_renderer)
+
+    for band = 0, band < 14, band++ {
+        val t: f32 = (band as f32) / 13.0
+        val cr: u8 = (22.0 - 14.0 * t) as u8
+        val cg: u8 = (3.0 + 4.0 * t) as u8
+        val cb: u8 = (5.0 + 5.0 * t) as u8
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, 255 as u8)
+        st.g_aux_rect.x = 0
+        st.g_aux_rect.y = band * constants.SCREEN_HEIGHT / 14
+        st.g_aux_rect.w = constants.SCREEN_WIDTH
+        st.g_aux_rect.h = constants.SCREEN_HEIGHT / 14 + 1
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+
+    draw.draw_glow(constants.SCREEN_WIDTH / 2, 340, 230, 210 as u8, 30 as u8, 30 as u8, 62 as u8)
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        300,
+        "YOU DIED",
+        11,
+        238 as u8,
+        52 as u8,
+        52 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        470,
+        "WAVE REACHED",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    draw.draw_int(
+        constants.SCREEN_WIDTH / 2 - 20,
+        510,
+        st.wave,
+        6,
+        255 as u8,
+        230 as u8,
+        150 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        620,
+        "BEST WAVE",
+        3,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
+    draw.draw_int(
+        constants.SCREEN_WIDTH / 2 - 32,
+        660,
+        st.progress.bestWave,
+        5,
+        220 as u8,
+        225 as u8,
+        235 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        790,
+        "CLICK OR PRESS ENTER TO RETURN TO MENU",
+        3,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
+}

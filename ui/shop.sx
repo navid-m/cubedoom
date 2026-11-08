@@ -1,0 +1,415 @@
+val audio     = use("../core/audio.sx")
+val constants = use("../core/constants.sx")
+val draw      = use("../core/draw.sx")
+val platform  = use("../core/platform.sx")
+val sdl       = use("../core/sdl.sx")
+val shop      = use("../game/shop.sx")
+val state     = use("../core/state.sx")
+
+pub fn shop_row_x() i32 = {
+    return 260
+}
+
+pub fn shop_row_y(index: i32) i32 = {
+    return 250 + index * 98
+}
+
+pub fn shop_row_h() i32 = {
+    return 86
+}
+
+pub fn shop_row_w() i32 = {
+    return 760
+}
+
+pub fn update_shop() void = trust {
+    val st: mut ref state.Game = state.game()
+    if st.inputEPressed || st.inputEscapePressed {
+        audio.play_sound(st.g_clickSound)
+        st.gameState = constants.STATE_PLAYING
+        platform.set_relative_mouse(true)
+        return
+    }
+    if st.inputNum1 {
+        shop.try_buy(0)
+    } elif st.inputNum2 {
+        shop.try_buy(1)
+    } elif st.inputNum3 {
+        shop.try_buy(2)
+    } elif st.inputNum4 {
+        shop.try_buy(3)
+    } elif st.inputNum5 {
+        shop.try_buy(4)
+    } elif st.inputNum6 {
+        shop.try_buy(5)
+    }
+    if st.inputClick {
+        for i = 0, i < 6, i++ {
+            if draw.point_in(
+                shop_row_x(),
+                shop_row_y(i),
+                shop_row_w(),
+                shop_row_h(),
+                st.inputMouseX,
+                st.inputMouseY
+            ) {
+                shop.try_buy(i)
+                break
+            }
+        }
+    }
+}
+
+pub fn render_shop() void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, 4 as u8, 5 as u8, 8 as u8, 255 as u8)
+    sdl.SDL_RenderClear(st.g_renderer)
+
+    for band = 0, band < 12, band++ {
+        val t: f32 = (band as f32) / 11.0
+        val cr: u8 = (7.0 + 11.0 * t) as u8
+        val cg: u8 = (8.0 + 13.0 * t) as u8
+        val cb: u8 = (12.0 + 18.0 * t) as u8
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, 255 as u8)
+        st.g_aux_rect.x = 0
+        st.g_aux_rect.y = band * constants.SCREEN_HEIGHT / 12
+        st.g_aux_rect.w = constants.SCREEN_WIDTH
+        st.g_aux_rect.h = constants.SCREEN_HEIGHT / 12 + 1
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+
+    draw.draw_panel(210, 80, 860, 800, 10 as u8, 13 as u8, 18 as u8, 238 as u8)
+    draw.draw_border(210, 80, 860, 800, 3, 216 as u8, 166 as u8, 48 as u8, 255 as u8)
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        116,
+        "UPGRADES BOOTH",
+        6,
+        246 as u8,
+        206 as u8,
+        84 as u8,
+        255 as u8
+    )
+    draw.draw_text(260, 190, "XP", 3, 255 as u8, 196 as u8, 72 as u8, 255 as u8)
+    draw.draw_int(320, 190, st.progress.xp, 3, 255 as u8, 236 as u8, 154 as u8, 255 as u8)
+
+    for i = 0, i < 6, i++ {
+        val rowX: i32 = shop_row_x()
+        val rowY: i32 = shop_row_y(i)
+        val hover: bool = draw.point_in(
+            rowX,
+            rowY,
+            shop_row_w(),
+            shop_row_h(),
+            st.uiMouseX,
+            st.uiMouseY
+        )
+        if hover {
+            draw.draw_panel(
+                rowX - 4,
+                rowY - 4,
+                shop_row_w() + 8,
+                shop_row_h() + 8,
+                255 as u8,
+                190 as u8,
+                60 as u8,
+                48 as u8
+            )
+            draw.draw_panel(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                36 as u8,
+                30 as u8,
+                18 as u8,
+                245 as u8
+            )
+            draw.draw_border(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                2,
+                255 as u8,
+                205 as u8,
+                80 as u8,
+                255 as u8
+            )
+        } else {
+            draw.draw_panel(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                18 as u8,
+                22 as u8,
+                29 as u8,
+                225 as u8
+            )
+            draw.draw_border(
+                rowX,
+                rowY,
+                shop_row_w(),
+                shop_row_h(),
+                1,
+                62 as u8,
+                78 as u8,
+                94 as u8,
+                255 as u8
+            )
+        }
+        draw.draw_int(rowX + 24, rowY + 22, i + 1, 4, 255 as u8, 206 as u8, 84 as u8, 255 as u8)
+
+        val nameY: i32 = rowY + 16
+        val detailY: i32 = rowY + 52
+        if i == 0 {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "SHOTGUN",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "DOUBLE BARREL BLAST",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 1 {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "PLASMA RIFLE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "HARD HITTING ENERGY BOLT",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 2 {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "HEALTH UPGRADE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "MAX HEALTH +25",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 3 {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "DAMAGE UPGRADE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "ALL WEAPONS HIT HARDER",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } elif i == 4 {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "FIRE RATE",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "FASTER SHOOTING",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        } else {
+            draw.draw_text(
+                rowX + 90,
+                nameY,
+                "MOVE SPEED",
+                4,
+                235 as u8,
+                240 as u8,
+                246 as u8,
+                255 as u8
+            )
+            draw.draw_text(
+                rowX + 90,
+                detailY,
+                "MOVE FASTER",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+        }
+
+        if shop.shop_owned(i) {
+            draw.draw_text(
+                rowX + 540,
+                rowY + 30,
+                "OWNED",
+                3,
+                96 as u8,
+                235 as u8,
+                140 as u8,
+                255 as u8
+            )
+        } elif i > 1 && shop.shop_maxed(i) {
+            draw.draw_text(
+                rowX + 556,
+                rowY + 30,
+                "MAX",
+                3,
+                255 as u8,
+                206 as u8,
+                92 as u8,
+                255 as u8
+            )
+            draw.draw_int(
+                rowX + 590,
+                rowY + 42,
+                i - 1,
+                2,
+                140 as u8,
+                150 as u8,
+                160 as u8,
+                255 as u8
+            )
+        } else {
+            val cost: i32 = shop.shop_cost(i)
+            val affordable: bool = st.progress.xp >= cost
+            draw.draw_text(
+                rowX + 540,
+                rowY + 30,
+                "COST",
+                2,
+                150 as u8,
+                165 as u8,
+                180 as u8,
+                255 as u8
+            )
+            if affordable {
+                draw.draw_int(
+                    rowX + 592,
+                    rowY + 24,
+                    cost,
+                    3,
+                    255 as u8,
+                    220 as u8,
+                    120 as u8,
+                    255 as u8
+                )
+            } else {
+                draw.draw_int(
+                    rowX + 592,
+                    rowY + 24,
+                    cost,
+                    3,
+                    226 as u8,
+                    76 as u8,
+                    76 as u8,
+                    255 as u8
+                )
+            }
+            draw.draw_text(
+                rowX + 548,
+                rowY + 56,
+                "XP",
+                2,
+                160 as u8,
+                150 as u8,
+                110 as u8,
+                255 as u8
+            )
+            if i > 1 {
+                draw.draw_text(
+                    rowX + 620,
+                    rowY + 56,
+                    "LV",
+                    2,
+                    140 as u8,
+                    150 as u8,
+                    160 as u8,
+                    255 as u8
+                )
+                val level: mut i32 = st.progress.healthLevel
+                if i == 3 {
+                    level = st.progress.damageLevel
+                } elif i == 4 {
+                    level = st.progress.fireRateLevel
+                } elif i == 5 {
+                    level = st.progress.speedLevel
+                }
+                draw.draw_int(
+                    rowX + 646,
+                    rowY + 56,
+                    level,
+                    2,
+                    220 as u8,
+                    225 as u8,
+                    235 as u8,
+                    255 as u8
+                )
+            }
+        }
+    }
+
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        898,
+        "PRESS 1-6 OR CLICK TO BUY    E / ESC TO CLOSE",
+        2,
+        150 as u8,
+        165 as u8,
+        180 as u8,
+        255 as u8
+    )
+}

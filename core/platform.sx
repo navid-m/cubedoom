@@ -1,0 +1,58 @@
+val fs        = use("std/fs")
+val constants = use("constants.sx")
+val sdl       = use("sdl.sx")
+val state     = use("state.sx")
+
+pub fn take_screenshot() void = trust {
+    val st: mut ref state.Game = state.game()
+    val base: ref u8 = sdl.SDL_GetBasePath()
+    if base == none {
+        return
+    }
+
+    val dirPath: mut [512]u8 = @zeroed
+    @snprintf(dirPath as ref u8, 512, "{s}screenshots", {base})
+    fs.mkdir_path(dirPath as ref u8)
+
+    st.screenshotCounter++
+    val filePath: mut [512]u8 = @zeroed
+    @snprintf(filePath as ref u8, 512, "{s}screenshots/screenshot_{d}_{d}.png", {
+            base,
+            sdl.SDL_GetTicks(),
+            st.screenshotCounter
+        })
+
+    val surface: ref void = sdl.SDL_CreateRGBSurfaceWithFormat(
+        0 as u32,
+        constants.SCREEN_WIDTH,
+        constants.SCREEN_HEIGHT,
+        32,
+        C.SDL_PIXELFORMAT_ARGB8888 as u32
+    )
+    if surface != none {
+        val surf: ref sdl.SDL_Surface = surface as ref sdl.SDL_Surface
+        if sdl.SDL_RenderReadPixels(
+            st.g_renderer,
+            none as ref void,
+            C.SDL_PIXELFORMAT_ARGB8888 as u32,
+            surf.pixels,
+            surf.pitch
+        ) == 0 {
+            sdl.IMG_SavePNG(surface, filePath as ref u8)
+        }
+        sdl.SDL_FreeSurface(surface)
+    }
+    sdl.SDL_free(base as ref void)
+}
+
+pub fn set_relative_mouse(enabled: bool) void = trust {
+    val st: mut ref state.Game = state.game()
+    val want: mut i32 = 0
+    if enabled {
+        want = 1
+    }
+    if st.relativeMouseMode != want {
+        st.relativeMouseMode = want
+        sdl.SDL_SetRelativeMouseMode(want)
+    }
+}

@@ -1,0 +1,765 @@
+val constants = use("../core/constants.sx")
+val draw      = use("../core/draw.sx")
+val mapmod    = use("../world/map.sx")
+val sdl       = use("../core/sdl.sx")
+val state     = use("../core/state.sx")
+
+pub fn draw_diamond_geo(
+    cx: i32,
+    cy: i32,
+    rx: i32,
+    ry: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val st: ref state.Game = state.game()
+    if rx < 1 || ry < 1 {
+        return
+    }
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+
+    val top: mut ref sdl.SDL_Vertex = state.vertex_at(0)
+    top.position.x = cx as f32
+    top.position.y = (cy - ry) as f32
+    top.color.r = cr
+    top.color.g = cg
+    top.color.b = cb
+    top.color.a = ca
+    top.tex_coord.x = 0.0
+    top.tex_coord.y = 0.0
+
+    val right: mut ref sdl.SDL_Vertex = state.vertex_at(1)
+    right.position.x = (cx + rx) as f32
+    right.position.y = cy as f32
+    right.color.r = cr
+    right.color.g = cg
+    right.color.b = cb
+    right.color.a = ca
+    right.tex_coord.x = 0.0
+    right.tex_coord.y = 0.0
+
+    val bottom: mut ref sdl.SDL_Vertex = state.vertex_at(2)
+    bottom.position.x = cx as f32
+    bottom.position.y = (cy + ry) as f32
+    bottom.color.r = cr
+    bottom.color.g = cg
+    bottom.color.b = cb
+    bottom.color.a = ca
+    bottom.tex_coord.x = 0.0
+    bottom.tex_coord.y = 0.0
+
+    val left: mut ref sdl.SDL_Vertex = state.vertex_at(3)
+    left.position.x = (cx - rx) as f32
+    left.position.y = cy as f32
+    left.color.r = cr
+    left.color.g = cg
+    left.color.b = cb
+    left.color.a = ca
+    left.tex_coord.x = 0.0
+    left.tex_coord.y = 0.0
+
+    state.write_index(0, 0)
+    state.write_index(1, 1)
+    state.write_index(2, 2)
+    state.write_index(3, 0)
+    state.write_index(4, 2)
+    state.write_index(5, 3)
+    sdl.SDL_RenderGeometry(
+        st.g_renderer,
+        none as ref void,
+        st.g_vertices as ref sdl.SDL_Vertex,
+        4 as i32,
+        st.g_indices as ref i32,
+        6 as i32
+    )
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn draw_xp_symbol(cx: i32, cy: i32, size: i32, phase: f32) void = trust {
+    val st: ref state.Game = state.game()
+    val radius: mut i32 = size
+    if radius < 3 {
+        radius = 3
+    }
+    if radius > 74 {
+        radius = 74
+    }
+    draw.draw_glow(cx, cy, radius + 9, 255 as u8, 190 as u8, 54 as u8, 52 as u8)
+    val spin: f32 = 0.28 + 0.72 * sdl.fabsf(sdl.cosf(st.gameTime * 3.7 + phase))
+    val rx: i32 = ((radius as f32) * spin) as i32
+    if rx > 0 {
+        draw_diamond_geo(
+            cx,
+            cy,
+            rx,
+            radius,
+            255 as u8,
+            184 as u8,
+            36 as u8,
+            235 as u8
+        )
+        draw_diamond_geo(
+            cx,
+            cy,
+            rx * 55 / 100,
+            radius * 58 / 100,
+            255 as u8,
+            237 as u8,
+            148 as u8,
+            255 as u8
+        )
+    }
+    for spark = 0, spark < 4, spark++ {
+        val angle: f32 = st.gameTime * 2.4 + phase + (spark as f32) * (constants.PI * 0.5)
+        val distance: f32 = (radius as f32) * 0.94
+        val sx: i32 = cx + (sdl.cosf(angle) * distance) as i32
+        val sy: i32 = cy + (sdl.sinf(angle) * distance) as i32
+        val twinkle: u8 = (110.0 + 145.0 * (0.5 + 0.5 * sdl.sinf(st.gameTime * 5.0 + phase + (spark as f32) * 1.7))) as u8
+        draw.fill_circle(sx, sy, 2, 255 as u8, 236 as u8, 150 as u8, twinkle)
+    }
+}
+
+pub fn billboard_texture(kind: i32) ref void = {
+    val st: ref state.Game = state.game()
+    if kind == 2 {
+        return st.g_treeTex
+    }
+    if kind == 3 {
+        return st.g_healthTex
+    }
+    if kind == 4 || kind == 5 {
+        return st.g_bulletTex
+    }
+    if kind == 6 {
+        return st.g_boothTex
+    }
+    return st.g_enemyTex
+}
+
+pub fn billboard_src(
+    kind: i32,
+    x: mut ref i32,
+    y: mut ref i32,
+    w: mut ref i32,
+    h: mut ref i32
+) void = trust {
+    val st: ref state.Game = state.game()
+    if kind == 2 {
+        @deref(x) = 187
+        @deref(y) = 4
+        @deref(w) = 222
+        @deref(h) = 319
+    } elif kind == 3 {
+        @deref(x) = 50
+        @deref(y) = 30
+        @deref(w) = 240
+        @deref(h) = 280
+    } elif kind == 4 || kind == 5 {
+        @deref(x) = 0
+        @deref(y) = 0
+        @deref(w) = st.bulletTexW / 4
+        @deref(h) = st.bulletTexH
+    } elif kind == 6 {
+        @deref(x) = 0
+        @deref(y) = 0
+        @deref(w) = st.boothTexW
+        @deref(h) = st.boothTexH
+    } else {
+        @deref(x) = 55
+        @deref(y) = 40
+        @deref(w) = 180
+        @deref(h) = 275
+    }
+}
+
+pub fn add_billboard(
+    list: ref state.Billboard,
+    count: mut ref i32,
+    kind: i32,
+    index: i32,
+    px: f32,
+    py: f32
+) void = trust {
+    val st: ref state.Game = state.game()
+    if @deref(count) >= constants.MAX_BILLBOARDS {
+        return
+    }
+    val billboard: mut ref state.Billboard = state.billboard_at(list, @deref(count))
+    val dx: f32 = px - (st.player.x + 4.0)
+    val dy: f32 = py - (st.player.y + 4.0)
+    billboard.kind = kind
+    billboard.index = index
+    billboard.distance = dx * dx + dy * dy
+    @deref(count) = @deref(count) + 1
+}
+
+pub fn render_billboards() void = trust {
+    val st: mut ref state.Game = state.game()
+    val list: mut [320]state.Billboard = @zeroed
+    val count: mut i32 = 0
+
+    for index = 0, index < constants.MAX_ENEMIES, index++ {
+        val enemy: ref state.Enemy = state.get_enemy(index)
+        if enemy.alive != 0 {
+            add_billboard(
+                list as ref state.Billboard,
+                @addr(count),
+                1,
+                index,
+                enemy.x + 4.0,
+                enemy.y + 4.0
+            )
+        }
+    }
+
+    for index = 0, index < st.treeCount, index++ {
+        val tree: ref state.Tree = state.tree_at(index)
+        add_billboard(list as ref state.Billboard, @addr(count), 2, index, tree.x, tree.y)
+    }
+
+    for index = 0, index < constants.MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref state.HealthPickup = state.pickup_at(index)
+        if pickup.active != 0 {
+            add_billboard(list as ref state.Billboard, @addr(count), 3, index, pickup.x, pickup.y)
+        }
+    }
+
+    for index = 0, index < constants.MAX_BULLETS, index++ {
+        val bullet: ref state.Bullet = state.get_bullet(index)
+        if bullet.alive != 0 {
+            val kind: mut i32 = 4
+            if bullet.isPlayer != 0 {
+                kind = 5
+            }
+            add_billboard(
+                list as ref state.Billboard,
+                @addr(count),
+                kind,
+                index,
+                bullet.x,
+                bullet.y
+            )
+        }
+    }
+
+    if st.boothFound {
+        add_billboard(list as ref state.Billboard, @addr(count), 6, 0, st.boothX, st.boothY)
+    }
+
+    for index = 0, index < constants.MAX_XP_ORBS, index++ {
+        val orb: ref state.XpOrb = state.xp_orb_at(index)
+        if orb.active != 0 {
+            add_billboard(list as ref state.Billboard, @addr(count), 7, index, orb.x, orb.y)
+        }
+    }
+
+    for i = 0, i < count - 1, i++ {
+        val farthest: mut i32 = i
+        for j = i + 1, j < count, j++ {
+            if state.billboard_at(
+                list as ref state.Billboard,
+                j
+            ).distance > state.billboard_at(list as ref state.Billboard, farthest).distance {
+                farthest = j
+            }
+        }
+        if farthest != i {
+            val a: mut ref state.Billboard = state.billboard_at(list as ref state.Billboard, i)
+            val b: mut ref state.Billboard = state.billboard_at(
+                list as ref state.Billboard,
+                farthest
+            )
+            val aKind: i32 = a.kind
+            val aIndex: i32 = a.index
+            val aDistance: f32 = a.distance
+            a.kind = b.kind
+            a.index = b.index
+            a.distance = b.distance
+            b.kind = aKind
+            b.index = aIndex
+            b.distance = aDistance
+        }
+    }
+
+    val pCX: f32 = st.player.x + 4.0
+    val pCY: f32 = st.player.y + 4.0
+    val det: f32 = st.player.planeX * st.player.dirY - st.player.dirX * st.player.planeY
+    if det == 0.0 {
+        return
+    }
+    val invDet: f32 = 1.0 / det
+    val horizon: f32 = (constants.SCREEN_HEIGHT as f32) / 2.0 + st.pitch + st.playerZ
+
+    for index = 0, index < count, index++ {
+        val billboard: ref state.Billboard = state.billboard_at(list as ref state.Billboard, index)
+        val kind: i32 = billboard.kind
+        val itemIndex: i32 = billboard.index
+        val worldX: mut f32 = 0.0
+        val worldY: mut f32 = 0.0
+        val heightUnits: mut f32 = 1.0
+
+        if kind == 1 {
+            val enemy: ref state.Enemy = state.get_enemy(itemIndex)
+            worldX = enemy.x + 4.0
+            worldY = enemy.y + 4.0
+            heightUnits = 1.05
+        } elif kind == 2 {
+            val tree: ref state.Tree = state.tree_at(itemIndex)
+            worldX = tree.x
+            worldY = tree.y
+            heightUnits = 1.7 * tree.scale
+        } elif kind == 3 {
+            val pickup: ref state.HealthPickup = state.pickup_at(itemIndex)
+            worldX = pickup.x
+            worldY = pickup.y
+            heightUnits = 0.42
+        } elif kind == 4 || kind == 5 {
+            val bullet: ref state.Bullet = state.get_bullet(itemIndex)
+            worldX = bullet.x
+            worldY = bullet.y
+            heightUnits = 0.12
+        } elif kind == 6 {
+            worldX = st.boothX
+            worldY = st.boothY
+            heightUnits = 1.35
+        } elif kind == 7 {
+            val orb: ref state.XpOrb = state.xp_orb_at(itemIndex)
+            worldX = orb.x
+            worldY = orb.y
+            heightUnits = 0.32
+        }
+
+        val dx: f32 = worldX - pCX
+        val dy: f32 = worldY - pCY
+        val tx: f32 = invDet * (st.player.dirY * dx - st.player.dirX * dy)
+        val ty: f32 = invDet * (-st.player.planeY * dx + st.player.planeX * dy)
+
+        if ty > 0.1 {
+            val depth: f32 = ty / (constants.TILE_SIZE as f32)
+            val unit: f32 = (constants.SCREEN_HEIGHT as f32) / depth
+            val screenX: i32 = ((constants.SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
+
+            if kind == 7 {
+                val orb: ref state.XpOrb = state.xp_orb_at(itemIndex)
+                if screenX >= 0 && screenX < constants.SCREEN_WIDTH {
+                    val zVal: usize = @load(@ptradd(st.zbuf, (screenX as usize) * 8)) as usize
+                    val orbDistance: usize = (depth * 100000.0) as usize
+                    if orbDistance < zVal {
+                        val bob: f32 = sdl.sinf(st.gameTime * 2.3 + orb.phase) * unit * 0.055
+                        val centerY: i32 = (horizon + unit * 0.52 + bob) as i32
+                        val symbolSize: i32 = (unit * 0.095) as i32 + 4
+                        draw_xp_symbol(screenX, centerY, symbolSize, orb.phase)
+                    }
+                }
+                continue
+            }
+
+            val srcX: mut i32 = 0
+            val srcY: mut i32 = 0
+            val srcW: mut i32 = 1
+            val srcH: mut i32 = 1
+            billboard_src(kind, @addr(srcX), @addr(srcY), @addr(srcW), @addr(srcH))
+            if kind == 4 || kind == 5 {
+                val bullet: ref state.Bullet = state.get_bullet(itemIndex)
+                val frame: i32 = ((bullet.animTime * 8.0) as i32) % 4
+                srcX = frame * (st.bulletTexW / 4)
+            }
+
+            val spriteH: i32 = (unit * heightUnits) as i32
+            val spriteW: i32 = spriteH * srcW / srcH
+            if spriteH > 0 && spriteW > 0 {
+                val floorY: f32 = horizon + unit
+                val bottomY: mut f32 = floorY
+                if kind == 3 {
+                    bottomY = floorY - unit * 0.10 - sdl.sinf(st.gameTime * 2.2 + (itemIndex as f32)) * 4.0
+                } elif kind == 4 || kind == 5 {
+                    bottomY = horizon + unit * 0.12
+                }
+                val topY: f32 = bottomY - (spriteH as f32)
+
+                val clipTopF: mut f32 = topY
+                val clipBottomF: mut f32 = bottomY
+                if clipTopF < 0.0 {
+                    clipTopF = 0.0
+                }
+                if clipBottomF > (constants.SCREEN_HEIGHT as f32) {
+                    clipBottomF = constants.SCREEN_HEIGHT as f32
+                }
+
+                if clipBottomF > clipTopF {
+                    val drawStartY: i32 = clipTopF as i32
+                    val drawEndY: i32 = clipBottomF as i32
+                    val visibleH: f32 = clipBottomF - clipTopF
+                    val srcYAdjusted: i32 = srcY + ((srcH as f32) * ((clipTopF - topY) / (spriteH as f32))) as i32
+                    val srcHAdjusted: mut i32 = ((srcH as f32) * (visibleH / (spriteH as f32))) as i32
+                    if srcHAdjusted < 1 {
+                        srcHAdjusted = 1
+                    }
+
+                    val drawStartX: mut i32 = screenX - spriteW / 2
+                    val drawEndX: mut i32 = screenX + spriteW / 2
+                    if drawStartX < 0 {
+                        drawStartX = 0
+                    }
+                    if drawEndX >= constants.SCREEN_WIDTH {
+                        drawEndX = constants.SCREEN_WIDTH - 1
+                    }
+
+                    val scaledDist: usize = (depth * 100000.0) as usize
+                    val spriteLeft: i32 = screenX - spriteW / 2
+                    val texture: ref void = billboard_texture(kind)
+
+                    if texture != none {
+                        if kind == 4 || kind == 5 {
+                            val bullet: ref state.Bullet = state.get_bullet(itemIndex)
+                            if bullet.weapon == 9 {
+                                sdl.SDL_SetTextureColorMod(texture, 255 as u8, 92 as u8, 82 as u8)
+                            } elif bullet.weapon == 2 {
+                                sdl.SDL_SetTextureColorMod(texture, 92 as u8, 224 as u8, 255 as u8)
+                            } elif bullet.weapon == 1 {
+                                sdl.SDL_SetTextureColorMod(texture, 255 as u8, 196 as u8, 110 as u8)
+                            } else {
+                                sdl.SDL_SetTextureColorMod(texture, 255 as u8, 236 as u8, 168 as u8)
+                            }
+                            if bullet.weapon == 2 && screenX >= 0 && screenX < constants.SCREEN_WIDTH {
+                                draw.draw_glow(
+                                    screenX,
+                                    (drawStartY + drawEndY) / 2,
+                                    16,
+                                    86 as u8,
+                                    220 as u8,
+                                    255 as u8,
+                                    58 as u8
+                                )
+                            }
+                        } else {
+                            sdl.SDL_SetTextureColorMod(texture, 255 as u8, 255 as u8, 255 as u8)
+                        }
+                        val xi: mut i32 = drawStartX
+                        for xi < drawEndX {
+                            val zbufVal: usize = @load(@ptradd(st.zbuf, (xi as usize) * 8)) as usize
+                            if scaledDist < zbufVal {
+                                val texX: i32 = srcX + ((xi - spriteLeft) * srcW) / spriteW
+                                if texX >= srcX && texX < srcX + srcW {
+                                    st.g_src_rect.x = texX
+                                    st.g_src_rect.y = srcYAdjusted
+                                    st.g_src_rect.w = 1
+                                    st.g_src_rect.h = srcHAdjusted
+                                    st.g_dst_rect.x = xi
+                                    st.g_dst_rect.y = drawStartY
+                                    st.g_dst_rect.w = 1
+                                    st.g_dst_rect.h = drawEndY - drawStartY
+                                    sdl.SDL_RenderCopy(
+                                        st.g_renderer,
+                                        texture,
+                                        st.g_src_rect as ref void,
+                                        st.g_dst_rect as ref void
+                                    )
+                                }
+                            }
+                            xi++
+                        }
+                        if kind == 4 || kind == 5 {
+                            sdl.SDL_SetTextureColorMod(texture, 255 as u8, 255 as u8, 255 as u8)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for index = 0, index < constants.MAX_HEALTH_PICKUPS, index++ {
+        val pickup: ref state.HealthPickup = state.pickup_at(index)
+        if pickup.active != 0 {
+            val dx: f32 = pickup.x - pCX
+            val dy: f32 = pickup.y - pCY
+            val tx: f32 = invDet * (st.player.dirY * dx - st.player.dirX * dy)
+            val ty: f32 = invDet * (-st.player.planeY * dx + st.player.planeX * dy)
+            if ty > 0.1 {
+                val depth: f32 = ty / (constants.TILE_SIZE as f32)
+                val unit: f32 = (constants.SCREEN_HEIGHT as f32) / depth
+                val screenX: i32 = ((constants.SCREEN_WIDTH as f32 / 2.0) * (1.0 + tx / ty)) as i32
+                val centerY: i32 = (horizon + unit * 0.62) as i32
+                val visible: mut bool = false
+                if screenX >= 0 && screenX < constants.SCREEN_WIDTH {
+                    val wallDistance: usize = @load(@ptradd(
+                            st.zbuf,
+                            (screenX as usize) * 8
+                        )) as usize
+                    val spriteDistance: usize = (depth * 100000.0) as usize
+                    if spriteDistance < wallDistance {
+                        visible = true
+                    }
+                }
+                if visible {
+                    draw.draw_glow(
+                        screenX,
+                        centerY,
+                        (unit * 0.16) as i32 + 6,
+                        80 as u8,
+                        255 as u8,
+                        120 as u8,
+                        34 as u8
+                    )
+                    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 2 as i32)
+                    for particle = 0, particle < 6, particle++ {
+                        val raw: f32 = st.gameTime * 0.55 + (index as f32) * 0.19 + (particle as f32) * 0.166
+                        val phase: f32 = raw - (raw as i32) as f32
+                        val px: i32 = screenX + (sdl.sinf(st.gameTime * 1.7 + (particle as f32) * 1.9 + (index as f32)) * 22.0) as i32
+                        val py: i32 = (horizon + unit * 0.95 - phase * unit * 0.85) as i32
+                        val alpha: u8 = ((1.0 - phase) * 130.0) as u8
+                        draw.fill_circle(
+                            px,
+                            py,
+                            2 + (particle % 2),
+                            90 as u8,
+                            255 as u8,
+                            140 as u8,
+                            alpha
+                        )
+                    }
+                    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+                }
+            }
+        }
+    }
+
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn load_texture(renderer: ref void, path: ref u8) ref void = trust {
+    val surface: ref void = sdl.IMG_Load(path)
+    if surface == none {
+        return none
+    }
+    val texture: ref void = sdl.SDL_CreateTextureFromSurface(renderer, surface)
+    sdl.SDL_FreeSurface(surface)
+    if texture != none {
+        sdl.SDL_SetTextureBlendMode(texture, 1 as i32)
+    }
+    return texture
+}
+
+pub fn texture_size(texture: ref void) state.TextureSize = trust {
+    val size: mut state.TextureSize = @zeroed
+    sdl.SDL_QueryTexture(
+        texture,
+        none as ref void,
+        none as ref void,
+        @addr(size.w) as ref void,
+        @addr(size.h) as ref void
+    )
+    if size.w < 1 {
+        size.w = 1
+    }
+    if size.h < 1 {
+        size.h = 1
+    }
+    return size
+}
+
+pub fn load_wall_texture(renderer: ref void, path: ref u8, index: i32) void = trust {
+    val texture: ref void = load_texture(renderer, path)
+    if texture == none {
+        return
+    }
+    val wall: mut ref state.WallTexture = state.wall_texture(index)
+    val size: state.TextureSize = texture_size(texture)
+    wall.tex = texture
+    wall.w = size.w
+    wall.h = size.h
+}
+
+pub fn wall_texture_for(id: i32) mut ref state.WallTexture = {
+    if id == 2 {
+        return state.wall_texture(1)
+    }
+    if id == 3 {
+        return state.wall_texture(2)
+    }
+    return state.wall_texture(0)
+}
+
+pub fn wall_span_flush(span: mut ref state.WallSpan) void = trust {
+    val st: mut ref state.Game = state.game()
+    if span.active == 0 {
+        return
+    }
+    span.active = 0
+
+    val spanWidth: i32 = span.end_x - span.start_x + 1
+    if spanWidth <= 0 {
+        return
+    }
+
+    val cellId: i32 = mapmod.map_at(span.cell_x, span.cell_y)
+    val wall: ref state.WallTexture = wall_texture_for(cellId)
+
+    if wall.tex == none {
+        val column: ref state.ColumnInfo = state.column_info(span.start_x)
+        val clipTop: mut f32 = column.top
+        val clipBottom: mut f32 = column.bottom
+        if clipTop < 0.0 {
+            clipTop = 0.0
+        }
+        if clipBottom > (constants.SCREEN_HEIGHT as f32) {
+            clipBottom = constants.SCREEN_HEIGHT as f32
+        }
+        if clipBottom > clipTop {
+            sdl.SDL_SetRenderDrawColor(st.g_renderer, 255, 0, 0, 255)
+            st.g_aux_rect.x = span.start_x
+            st.g_aux_rect.y = clipTop as i32
+            st.g_aux_rect.w = spanWidth
+            st.g_aux_rect.h = (clipBottom - clipTop) as i32
+            sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        }
+        return
+    }
+
+    if spanWidth == 1 {
+        val column: ref state.ColumnInfo = state.column_info(span.start_x)
+        val wallHeight: f32 = column.bottom - column.top
+        val segHeight: f32 = wallHeight / (constants.WALL_TEX_REPEATS as f32)
+        val uRaw: f32 = column.tex * constants.CELL_TEX_REPEATS
+        val u: f32 = uRaw - (uRaw as i32) as f32
+
+        for segment = 0, segment < constants.WALL_TEX_REPEATS, segment++ {
+            val segTop: f32 = column.top + segHeight * (segment as f32)
+            val segBottom: f32 = segTop + segHeight
+            val clipTop: mut f32 = segTop
+            val clipBottom: mut f32 = segBottom
+            if clipTop < 0.0 {
+                clipTop = 0.0
+            }
+            if clipBottom > (constants.SCREEN_HEIGHT as f32) {
+                clipBottom = constants.SCREEN_HEIGHT as f32
+            }
+            if clipBottom > clipTop {
+                val vTop: f32 = (clipTop - segTop) / segHeight
+                val vBottom: f32 = (clipBottom - segTop) / segHeight
+                val srcX: i32 = (u * (wall.w as f32)) as i32
+                val srcY: i32 = (vTop * (wall.h as f32)) as i32
+                val srcH: mut i32 = ((vBottom - vTop) * (wall.h as f32)) as i32
+                if srcH < 1 {
+                    srcH = 1
+                }
+                sdl.SDL_SetTextureColorMod(wall.tex, column.shade, column.shade, column.shade)
+                st.g_src_rect.x = srcX
+                st.g_src_rect.y = srcY
+                st.g_src_rect.w = 1
+                st.g_src_rect.h = srcH
+                st.g_dst_rect.x = span.start_x
+                st.g_dst_rect.y = clipTop as i32
+                st.g_dst_rect.w = 1
+                st.g_dst_rect.h = (clipBottom - clipTop) as i32
+                sdl.SDL_RenderCopy(
+                    st.g_renderer,
+                    wall.tex,
+                    st.g_src_rect as ref void,
+                    st.g_dst_rect as ref void
+                )
+            }
+        }
+        return
+    }
+
+    sdl.SDL_SetTextureColorMod(wall.tex, 255, 255, 255)
+
+    for segment = 0, segment < constants.WALL_TEX_REPEATS, segment++ {
+        val vertexCount: mut i32 = 0
+        val indexCount: mut i32 = 0
+        val prevTop: mut i32 = 0
+        val prevBottom: mut i32 = 0
+
+        for x = span.start_x, x <= span.end_x, x++ {
+            val column: ref state.ColumnInfo = state.column_info(x)
+            val wallHeight: f32 = column.bottom - column.top
+            val segHeight: f32 = wallHeight / (constants.WALL_TEX_REPEATS as f32)
+            val segTop: f32 = column.top + segHeight * (segment as f32)
+            val segBottom: f32 = segTop + segHeight
+
+            val clipTop: mut f32 = segTop
+            val clipBottom: mut f32 = segBottom
+            if clipTop < 0.0 {
+                clipTop = 0.0
+            }
+            if clipBottom > (constants.SCREEN_HEIGHT as f32) {
+                clipBottom = constants.SCREEN_HEIGHT as f32
+            }
+            if clipBottom < clipTop {
+                clipBottom = clipTop
+            }
+
+            val vTop: mut f32 = (clipTop - segTop) / segHeight
+            val vBottom: mut f32 = (clipBottom - segTop) / segHeight
+            if vTop < 0.0 {
+                vTop = 0.0
+            }
+            if vTop > 1.0 {
+                vTop = 1.0
+            }
+            if vBottom < 0.0 {
+                vBottom = 0.0
+            }
+            if vBottom > 1.0 {
+                vBottom = 1.0
+            }
+
+            val uRaw: f32 = column.tex * constants.CELL_TEX_REPEATS
+            val u: f32 = uRaw - (uRaw as i32) as f32
+
+            val topVertex: mut ref sdl.SDL_Vertex = state.vertex_at(vertexCount)
+            topVertex.position.x = x as f32
+            topVertex.position.y = clipTop
+            topVertex.color.r = column.shade
+            topVertex.color.g = column.shade
+            topVertex.color.b = column.shade
+            topVertex.color.a = 255
+            topVertex.tex_coord.x = u
+            topVertex.tex_coord.y = vTop
+            vertexCount++
+
+            val bottomVertex: mut ref sdl.SDL_Vertex = state.vertex_at(vertexCount)
+            bottomVertex.position.x = x as f32
+            bottomVertex.position.y = clipBottom
+            bottomVertex.color.r = column.shade
+            bottomVertex.color.g = column.shade
+            bottomVertex.color.b = column.shade
+            bottomVertex.color.a = 255
+            bottomVertex.tex_coord.x = u
+            bottomVertex.tex_coord.y = vBottom
+            vertexCount++
+
+            if x > span.start_x {
+                state.write_index(indexCount, prevTop)
+                indexCount++
+                state.write_index(indexCount, prevBottom)
+                indexCount++
+                state.write_index(indexCount, vertexCount - 2)
+                indexCount++
+                state.write_index(indexCount, vertexCount - 2)
+                indexCount++
+                state.write_index(indexCount, prevBottom)
+                indexCount++
+                state.write_index(indexCount, vertexCount - 1)
+                indexCount++
+            }
+
+            prevTop = vertexCount - 2
+            prevBottom = vertexCount - 1
+        }
+
+        if indexCount > 0 {
+            sdl.SDL_RenderGeometry(
+                st.g_renderer,
+                wall.tex,
+                st.g_vertices as ref sdl.SDL_Vertex,
+                vertexCount,
+                st.g_indices as ref i32,
+                indexCount
+            )
+        }
+    }
+}

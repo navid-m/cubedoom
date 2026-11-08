@@ -1,0 +1,218 @@
+extern "SDL.h"
+
+extern "SDL_image.h"
+
+extern "SDL_mixer.h"
+
+link "-lSDL2"
+
+link "-lSDL2_image"
+
+link "-lSDL2_mixer"
+
+link "-lm"
+
+pub extern type SDL_Rect = {
+    x: mut i32
+    y: mut i32
+    w: mut i32
+    h: mut i32
+}
+
+pub extern type SDL_Event = {
+    type_value: mut u32
+    padding: mut [52]u8
+}
+
+pub extern type SDL_FPoint = {
+    x: mut f32
+    y: mut f32
+}
+
+pub extern type SDL_Color = {
+    r: mut u8
+    g: mut u8
+    b: mut u8
+    a: mut u8
+}
+
+pub extern type SDL_Vertex = {
+    position: mut SDL_FPoint
+    color: mut SDL_Color
+    tex_coord: mut SDL_FPoint
+}
+
+pub extern type SDL_Surface = {
+    flags: mut u32
+    format: mut ref void
+    w: mut i32
+    h: mut i32
+    pitch: mut i32
+    pixels: mut ref void
+    userdata: mut ref void
+    locked: mut i32
+    list_blitmap: mut ref void
+    clip_rect: mut SDL_Rect
+    map: mut ref void
+    refcount: mut i32
+}
+
+pub extern (C, header) fn SDL_Init(flags: u32) i32 = "SDL_Init"
+
+pub extern (C, header) fn SDL_CreateWindow(
+    title: ref char,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    flags: u32
+) ref void = "SDL_CreateWindow"
+
+pub extern (C, header) fn SDL_CreateRenderer(
+    win: ref void,
+    index: i32,
+    flags: u32
+) ref void = "SDL_CreateRenderer"
+
+pub extern (C, header) fn SDL_PollEvent(event: ref SDL_Event) i32 = "SDL_PollEvent"
+
+pub extern (C, header) fn SDL_GetTicks() u32 = "SDL_GetTicks"
+
+pub extern (C, header) fn SDL_GetKeyboardState(numkeys: ref i32) ref u8 = "SDL_GetKeyboardState"
+
+pub extern (C, header) fn SDL_SetRenderDrawColor(
+    renderer: ref void,
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+) i32 = "SDL_SetRenderDrawColor"
+
+pub extern (C, header) fn SDL_RenderClear(renderer: ref void) i32 = "SDL_RenderClear"
+
+pub extern (C, header) fn SDL_RenderFillRect(
+    renderer: ref void,
+    rect: ref SDL_Rect
+) i32 = "SDL_RenderFillRect"
+
+pub extern (C, header) fn SDL_RenderPresent(renderer: ref void) void = "SDL_RenderPresent"
+
+pub extern (C, header) fn SDL_DestroyRenderer(renderer: ref void) void = "SDL_DestroyRenderer"
+
+pub extern (C, header) fn SDL_DestroyWindow(window: ref void) void = "SDL_DestroyWindow"
+
+pub extern (C, header) fn SDL_Quit() void = "SDL_Quit"
+
+pub extern (C, header) fn SDL_CreateTextureFromSurface(
+    renderer: ref void,
+    surface: ref void
+) ref void = "SDL_CreateTextureFromSurface"
+
+pub extern (C, header) fn SDL_FreeSurface(surface: ref void) void = "SDL_FreeSurface"
+
+pub extern (C, header) fn SDL_RenderCopy(
+    renderer: ref void,
+    texture: ref void,
+    srcrect: ref void,
+    dstrect: ref void
+) i32 = "SDL_RenderCopy"
+
+pub extern (C, header) fn SDL_RenderGeometry(
+    renderer: ref void,
+    texture: ref void,
+    vertices: ref SDL_Vertex,
+    num_vertices: i32,
+    indices: ref i32,
+    num_indices: i32
+) i32 = "SDL_RenderGeometry"
+
+pub extern (C, header) fn SDL_SetTextureBlendMode(
+    texture: ref void,
+    blendMode: i32
+) i32 = "SDL_SetTextureBlendMode"
+
+pub extern (C, header) fn SDL_SetTextureColorMod(
+    texture: ref void,
+    r: u8,
+    g: u8,
+    b: u8
+) i32 = "SDL_SetTextureColorMod"
+
+pub extern (C, header) fn SDL_QueryTexture(
+    texture: ref void,
+    fmt: ref void,
+    access: ref void,
+    w: ref void,
+    h: ref void
+) i32 = "SDL_QueryTexture"
+
+pub extern (C, header) fn IMG_Load(file: ref u8) ref void = "IMG_Load"
+
+pub extern (C, header) fn IMG_SavePNG(surface: ref void, file: ref u8) i32 = "IMG_SavePNG"
+
+pub extern (C, header) fn SDL_CreateRGBSurfaceWithFormat(
+    flags: u32,
+    width: i32,
+    height: i32,
+    depth: i32,
+    format: u32
+) ref void = "SDL_CreateRGBSurfaceWithFormat"
+
+pub extern (C, header) fn SDL_RenderReadPixels(
+    renderer: ref void,
+    rect: ref void,
+    format: u32,
+    pixels: ref void,
+    pitch: i32
+) i32 = "SDL_RenderReadPixels"
+
+pub extern (C, header) fn SDL_GetBasePath() ref u8 = "SDL_GetBasePath"
+
+pub extern (C, header) fn SDL_free(ptr: ref void) void = "SDL_free"
+
+pub extern (C, header) fn SDL_SetRenderDrawBlendMode(
+    renderer: ref void,
+    blendMode: i32
+) i32 = "SDL_SetRenderDrawBlendMode"
+
+pub extern (C, header) fn SDL_SetRelativeMouseMode(enabled: i32) i32 = "SDL_SetRelativeMouseMode"
+
+pub extern (C, header) fn SDL_GetRelativeMouseState(
+    x: ref i32,
+    y: ref i32
+) u32 = "SDL_GetRelativeMouseState"
+
+pub extern (C, header) fn SDL_GetMouseState(x: ref i32, y: ref i32) u32 = "SDL_GetMouseState"
+
+pub extern (C, header) fn SDL_SetHint(name: ref u8, value: ref u8) i32 = "SDL_SetHint"
+
+pub extern (C, header) fn Mix_OpenAudio(
+    freq: i32,
+    format: u16,
+    channels: i32,
+    chunksize: i32
+) i32 = "Mix_OpenAudio"
+
+pub extern (C, header) fn Mix_LoadWAV(file: ref u8) ref void = "Mix_LoadWAV"
+
+pub extern (C, header) fn Mix_PlayChannel(
+    channel: i32,
+    chunk: ref void,
+    loops: i32
+) i32 = "Mix_PlayChannel"
+
+pub extern (C, header) fn Mix_VolumeChunk(chunk: ref void, volume: i32) i32 = "Mix_VolumeChunk"
+
+pub extern (C, header) fn Mix_FreeChunk(chunk: ref void) void = "Mix_FreeChunk"
+
+pub extern (C, header) fn Mix_CloseAudio() void = "Mix_CloseAudio"
+
+pub extern (C) fn cosf(x: f32) f32 = "cosf"
+
+pub extern (C) fn sinf(x: f32) f32 = "sinf"
+
+pub extern (C) fn fabsf(x: f32) f32 = "fabsf"
+
+pub extern (C) fn sqrtf(x: f32) f32 = "sqrtf"
+
+pub extern (C) fn atan2f(y: f32, x: f32) f32 = "atan2f"

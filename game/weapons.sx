@@ -1,0 +1,99 @@
+val audio     = use("../core/audio.sx")
+val constants = use("../core/constants.sx")
+val state     = use("../core/state.sx")
+
+pub fn weapon_unlocked(index: i32) bool = {
+    val st: ref state.Game = state.game()
+    if index == constants.WEAPON_MACHINE_GUN {
+        return true
+    }
+    if index == constants.WEAPON_SHOTGUN {
+        return st.progress.shotgun != 0
+    }
+    if index == constants.WEAPON_PLASMA {
+        return st.progress.plasma != 0
+    }
+    return false
+}
+
+pub fn weapon_name(index: i32) ref u8 = {
+    if index == constants.WEAPON_SHOTGUN {
+        return "SHOTGUN"
+    }
+    if index == constants.WEAPON_PLASMA {
+        return "PLASMA RIFLE"
+    }
+    return "MACHINE GUN"
+}
+
+pub fn weapon_shoot_sound(index: i32) ref void = {
+    val st: ref state.Game = state.game()
+    if index == constants.WEAPON_SHOTGUN {
+        return st.g_shootShotgunSound
+    }
+    if index == constants.WEAPON_PLASMA {
+        return st.g_shootPlasmaSound
+    }
+    return st.g_shootSound
+}
+
+pub fn weapon_switch_sound(index: i32) ref void = {
+    val st: ref state.Game = state.game()
+    if index == constants.WEAPON_SHOTGUN {
+        return st.g_switchShotgunSound
+    }
+    if index == constants.WEAPON_PLASMA {
+        return st.g_switchPlasmaSound
+    }
+    return st.g_switchMachineSound
+}
+
+pub fn weapon_cooldown(index: i32) f32 = {
+    val st: ref state.Game = state.game()
+    val multiplier: mut f32 = 1.0 - (st.progress.fireRateLevel as f32) * 0.08
+    if multiplier < 0.60 {
+        multiplier = 0.60
+    }
+    if index == constants.WEAPON_SHOTGUN {
+        return 0.88 * multiplier
+    }
+    if index == constants.WEAPON_PLASMA {
+        return 0.26 * multiplier
+    }
+    return 0.13 * multiplier
+}
+
+pub fn switch_weapon(index: i32) void = {
+    val st: mut ref state.Game = state.game()
+    if index < 0 || index > 2 {
+        return
+    }
+    if !weapon_unlocked(index) {
+        return
+    }
+    if index == st.currentWeapon && st.weaponEquip > 0.80 {
+        return
+    }
+    st.currentWeapon = index
+    st.weaponEquip = 0.0
+    st.shotgunReloadTimer = 0.0
+    st.shotgunReloadStage = 0
+    audio.play_sound(weapon_switch_sound(index))
+}
+
+pub fn current_gun_texture() ref void = {
+    val st: ref state.Game = state.game()
+    if st.currentWeapon == constants.WEAPON_SHOTGUN {
+        if st.shotgunReloadStage == 1 {
+            return st.g_shotgunReload1Tex
+        }
+        if st.shotgunReloadStage == 2 {
+            return st.g_shotgunReload2Tex
+        }
+        return st.g_shotgunTex
+    }
+    if st.currentWeapon == constants.WEAPON_PLASMA {
+        return st.g_plasmaTex
+    }
+    return st.g_machineGunTex
+}

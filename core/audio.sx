@@ -1,0 +1,15 @@
+val sdl = use("sdl.sx")
+
+pub fn play_sound(sound: ref void) void = {
+    if sound != none {
+        trust sdl.Mix_PlayChannel(-1 as i32, sound, 0 as i32)
+    }
+}
+
+pub fn load_sound(path: ref u8, volume: i32) ref void = trust {
+    val sound: ref void = sdl.Mix_LoadWAV(path)
+    if sound != none {
+        sdl.Mix_VolumeChunk(sound, volume)
+    }
+    return sound
+}

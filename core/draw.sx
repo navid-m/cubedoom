@@ -1,0 +1,279 @@
+val constants = use("constants.sx")
+val sdl       = use("sdl.sx")
+val state     = use("state.sx")
+
+// 5x7 bitmap font, ASCII 32..126. Each glyph is seven rows of five bits,
+// least-significant bit = leftmost column. Lowercase is folded to uppercase.
+pub val FONT_GLYPHS: [95]u64 = [
+    0, 134353028, 330, 217415040, 4777777604, 289881251, 1035966542, 132,
+    138549380, 205656196, 145860, 139432064, 4429185024, 458752, 134217728, 2221019400,
+    480623950, 1010962566, 505553167, 511981838, 301316492, 511981646, 480623694, 205664527,
+    481638734, 210185582, 134221824, 4429189120, 25369344, 32537600, 3551328, 138555662,
+    4227771840, 922040774, 532131183, 471926862, 515239279, 472320078, 69666894, 497912910,
+    381136235, 474091662, 511975694, 918003179, 1008797762, 866123643, 385334635, 482209134,
+    69692238, 9072143726, 918007151, 512104558, 138547359, 482209659, 216344955, 348126769,
+    920852939, 138557787, 1042493727, 406982788, 8862701634, 205656196, 326, 0,
+    6, 922040774, 532131183, 471926862, 515239279, 472320078, 69666894, 497912910,
+    381136235, 474091662, 511975694, 918003179, 1008797762, 866123643, 385334635, 482209134,
+    69692238, 9072143726, 918007151, 512104558, 138547359, 482209659, 216344955, 348126769,
+    920852939, 138557787, 1042493727, 406984836, 4433514628, 205664388, 1015808,
+]
+
+pub fn font_glyph(c: u8) u64 = trust {
+    val folded: mut i32 = c as i32
+    if folded >= 97 && folded <= 122 {
+        folded -= 32
+    }
+    val index: i32 = folded - 32
+    if index < 0 || index >= 95 {
+        return 0
+    }
+    return @load(@ptradd(FONT_GLYPHS as ref u64, (index as usize) * 8)) as u64
+}
+
+pub fn text_width(text: ref u8, scale: i32) i32 = trust {
+    val count: i32 = @strlen(text) as i32
+    if count <= 0 {
+        return 0
+    }
+    return count * 6 * scale - scale
+}
+
+pub fn draw_text(
+    x: i32,
+    y: i32,
+    text: ref u8,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val st: mut ref state.Game = state.game()
+    if scale < 1 {
+        return
+    }
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, ca)
+    val penX: mut i32 = x
+    val cursor: mut i64 = 0
+    for {
+        val c: u8 = @load8(@ptradd(text, cursor as usize))
+        if c == 0 {
+            break
+        }
+        val glyph: u64 = font_glyph(c)
+        for row = 0, row < 7, row++ {
+            val mask: u32 = ((glyph >> ((row * 5) as u64)) & 31 as u64) as u32
+            val column: mut i32 = 0
+            for column < 5 {
+                val bitMask: u32 = 1 as u32 << (column as u32)
+                if (mask & bitMask) == 0 {
+                    column++
+                } else {
+                    val runStart: i32 = column
+                    for {
+                        column++
+                        if column >= 5 {
+                            break
+                        }
+                        val nextMask: u32 = 1 as u32 << (column as u32)
+                        if (mask & nextMask) == 0 {
+                            break
+                        }
+                    }
+                    st.g_aux_rect.x = penX + runStart * scale
+                    st.g_aux_rect.y = y + row * scale
+                    st.g_aux_rect.w = (column - runStart) * scale
+                    st.g_aux_rect.h = scale
+                    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+                }
+            }
+        }
+        penX += 6 * scale
+        cursor++
+    }
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn draw_text_centered(
+    centerX: i32,
+    y: i32,
+    text: ref u8,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val width: i32 = text_width(text, scale)
+    draw_text(centerX - width / 2, y, text, scale, cr, cg, cb, ca)
+}
+
+pub fn draw_int(
+    x: i32,
+    y: i32,
+    value: i32,
+    scale: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    val digits: mut [16]u8 = @zeroed
+    val number: mut i32 = value
+    val negative: bool = number < 0
+    if negative {
+        number = -number
+    }
+
+    val digitCount: mut i32 = 0
+    if number == 0 {
+        @store8(digits as ref u8, 48 as u8)
+        digitCount = 1
+    } else {
+        for {
+            if number <= 0 {
+                break
+            }
+            val digit: i32 = number % 10
+            @store8(@ptradd(digits as ref u8, digitCount as usize), (48 + digit) as u8)
+            digitCount++
+            number = number / 10
+        }
+    }
+
+    val buffer: mut [24]u8 = @zeroed
+    val position: mut i32 = 0
+    if negative {
+        @store8(buffer as ref u8, 45 as u8)
+        position = 1
+    }
+    for i = 0, i < digitCount, i++ {
+        val digit: u8 = @load8(@ptradd(
+                digits as ref u8,
+                (digitCount - 1 - i) as usize
+            ))
+        @store8(@ptradd(buffer as ref u8, (position + i) as usize), digit)
+    }
+    @store8(@ptradd(buffer as ref u8, (position + digitCount) as usize), 0 as u8)
+    draw_text(x, y, buffer as ref u8, scale, cr, cg, cb, ca)
+}
+
+pub fn point_in(x: i32, y: i32, w: i32, h: i32, px: i32, py: i32) bool = {
+    return px >= x && px < x + w && py >= y && py < y + h
+}
+
+pub fn draw_panel(x: i32, y: i32, w: i32, h: i32, cr: u8, cg: u8, cb: u8, ca: u8) void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, ca)
+    st.g_aux_rect.x = x
+    st.g_aux_rect.y = y
+    st.g_aux_rect.w = w
+    st.g_aux_rect.h = h
+    sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn draw_border(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    thickness: i32,
+    cr: u8,
+    cg: u8,
+    cb: u8,
+    ca: u8
+) void = trust {
+    draw_panel(x, y, w, thickness, cr, cg, cb, ca)
+    draw_panel(x, y + h - thickness, w, thickness, cr, cg, cb, ca)
+    draw_panel(x, y, thickness, h, cr, cg, cb, ca)
+    draw_panel(x + w - thickness, y, thickness, h, cr, cg, cb, ca)
+}
+
+pub fn draw_button(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    label: ref u8,
+    hover: bool
+) void = trust {
+    if hover {
+        draw_panel(x - 4, y - 4, w + 8, h + 8, 255 as u8, 190 as u8, 60 as u8, 105 as u8)
+        draw_panel(x, y, w, h, 42 as u8, 34 as u8, 18 as u8, 245 as u8)
+        draw_border(x, y, w, h, 3, 255 as u8, 205 as u8, 80 as u8, 255 as u8)
+        draw_text_centered(
+            x + w / 2,
+            y + (h - 7 * 4) / 2,
+            label,
+            4,
+            255 as u8,
+            240 as u8,
+            190 as u8,
+            255 as u8
+        )
+    } else {
+        draw_panel(x, y, w, h, 16 as u8, 20 as u8, 26 as u8, 230 as u8)
+        draw_border(x, y, w, h, 2, 92 as u8, 112 as u8, 132 as u8, 255 as u8)
+        draw_text_centered(
+            x + w / 2,
+            y + (h - 7 * 4) / 2,
+            label,
+            4,
+            215 as u8,
+            225 as u8,
+            235 as u8,
+            255 as u8
+        )
+    }
+}
+
+pub fn fill_circle(cx: i32, cy: i32, radius: i32, r: u8, g: u8, b: u8, a: u8) void = {
+    val st: mut ref state.Game = state.game()
+    if radius < 1 {
+        return
+    }
+    trust sdl.SDL_SetRenderDrawColor(st.g_renderer, r, g, b, a)
+    for dy = -radius, dy <= radius, dy++ {
+        val inner: f32 = (radius * radius - dy * dy) as f32
+        val dx: i32 = (trust sdl.sqrtf(inner)) as i32
+        st.g_aux_rect.x = cx - dx
+        st.g_aux_rect.y = cy + dy
+        st.g_aux_rect.w = dx * 2 + 1
+        st.g_aux_rect.h = 1
+        trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+}
+
+pub fn draw_glow(cx: i32, cy: i32, radius: i32, r: u8, g: u8, b: u8, alpha: u8) void = {
+    val st: ref state.Game = state.game()
+    if radius < 1 {
+        return
+    }
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 2 as i32)
+    for layer = 0, layer < 4, layer++ {
+        val layerRadius: i32 = radius - (radius * layer) / 5
+        val layerAlpha: u8 = ((alpha as i32) * (4 - layer) / 4) as u8
+        fill_circle(cx, cy, layerRadius, r, g, b, layerAlpha)
+    }
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+}
+
+pub fn draw_flare_chain(x: i32, y: i32, strength: f32) void = {
+    val centerX: i32 = constants.SCREEN_WIDTH / 2
+    val centerY: i32 = constants.SCREEN_HEIGHT / 2
+    val dx: i32 = centerX - x
+    val dy: i32 = centerY - y
+
+    for step = 0, step < 4, step++ {
+        val factor: f32 = 0.22 + (step as f32) * 0.27
+        val fx: i32 = x + ((dx as f32) * factor) as i32
+        val fy: i32 = y + ((dy as f32) * factor) as i32
+        val radius: i32 = 17 - step * 3
+        val alpha: u8 = ((strength * (68.0 - (step as f32) * 11.0)) as i32) as u8
+        draw_glow(fx, fy, radius, 255 as u8, 190 as u8, 105 as u8, alpha)
+    }
+}

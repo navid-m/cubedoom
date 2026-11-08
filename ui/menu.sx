@@ -1,0 +1,178 @@
+val audio     = use("../core/audio.sx")
+val combat    = use("../game/combat.sx")
+val constants = use("../core/constants.sx")
+val draw      = use("../core/draw.sx")
+val sdl       = use("../core/sdl.sx")
+val state     = use("../core/state.sx")
+
+pub fn menu_play_x() i32 = {
+    return constants.SCREEN_WIDTH / 2 - 190
+}
+
+pub fn menu_play_y() i32 = {
+    return 520
+}
+
+pub fn menu_exit_y() i32 = {
+    return 620
+}
+
+pub fn update_menu() void = trust {
+    val st: mut ref state.Game = state.game()
+    if st.inputClick {
+        if draw.point_in(menu_play_x(), menu_play_y(), 380, 76, st.inputMouseX, st.inputMouseY) {
+            audio.play_sound(st.g_clickSound)
+            combat.start_game()
+            return
+        }
+        if draw.point_in(menu_play_x(), menu_exit_y(), 380, 76, st.inputMouseX, st.inputMouseY) {
+            audio.play_sound(st.g_clickSound)
+            st.quitRequested = true
+            return
+        }
+    }
+    if st.inputEnterPressed {
+        audio.play_sound(st.g_clickSound)
+        combat.start_game()
+        return
+    }
+    if st.inputEscapePressed {
+        st.quitRequested = true
+    }
+}
+
+pub fn render_menu() void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, 3 as u8, 4 as u8, 7 as u8, 255 as u8)
+    sdl.SDL_RenderClear(st.g_renderer)
+
+    for band = 0, band < 16, band++ {
+        val t: f32 = (band as f32) / 15.0
+        val cr: u8 = (5.0 + 10.0 * t) as u8
+        val cg: u8 = (6.0 + 13.0 * t) as u8
+        val cb: u8 = (14.0 + 24.0 * t) as u8
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, 255 as u8)
+        st.g_aux_rect.x = 0
+        st.g_aux_rect.y = band * constants.SCREEN_HEIGHT / 16
+        st.g_aux_rect.w = constants.SCREEN_WIDTH
+        st.g_aux_rect.h = constants.SCREEN_HEIGHT / 16 + 1
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+
+    for i = 0, i < 96, i++ {
+        val sx: i32 = (i * 173 + 37) % constants.SCREEN_WIDTH
+        val sy: i32 = (i * 97 + 23) % 470
+        val twinkle: f32 = 0.35 + 0.65 * (0.5 + 0.5 * sdl.sinf(st.gameTime * 1.4 + (i as f32) * 0.7))
+        val bright: u8 = (70.0 + 150.0 * twinkle) as u8
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, bright, bright, 255 as u8, 180 as u8)
+        st.g_aux_rect.x = sx
+        st.g_aux_rect.y = sy
+        st.g_aux_rect.w = 2
+        st.g_aux_rect.h = 2
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+
+    draw.draw_glow(constants.SCREEN_WIDTH / 2, 215, 220, 126 as u8, 255 as u8, 198 as u8, 42 as u8)
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2 + 5,
+        170,
+        "CUBEDOOM",
+        12,
+        8 as u8,
+        10 as u8,
+        14 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        160,
+        "CUBEDOOM",
+        12,
+        246 as u8,
+        206 as u8,
+        84 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        300,
+        "ARENA SURVIVAL",
+        4,
+        96 as u8,
+        214 as u8,
+        255 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        370,
+        "KILL WAVES. COLLECT XP. BUY GEAR.",
+        2,
+        150 as u8,
+        163 as u8,
+        178 as u8,
+        255 as u8
+    )
+
+    val hoverPlay: bool = draw.point_in(
+        menu_play_x(),
+        menu_play_y(),
+        380,
+        76,
+        st.uiMouseX,
+        st.uiMouseY
+    )
+    val hoverExit: bool = draw.point_in(
+        menu_play_x(),
+        menu_exit_y(),
+        380,
+        76,
+        st.uiMouseX,
+        st.uiMouseY
+    )
+    draw.draw_button(menu_play_x(), menu_play_y(), 380, 76, "PLAY GAME", hoverPlay)
+    draw.draw_button(menu_play_x(), menu_exit_y(), 380, 76, "EXIT", hoverExit)
+
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        780,
+        "BEST WAVE",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    val bestWidth: i32 = draw.text_width("BEST WAVE", 3)
+    draw.draw_int(
+        constants.SCREEN_WIDTH / 2 + bestWidth / 2 + 24,
+        780,
+        st.progress.bestWave,
+        3,
+        255 as u8,
+        236 as u8,
+        154 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        840,
+        "XP BANK",
+        2,
+        120 as u8,
+        132 as u8,
+        146 as u8,
+        255 as u8
+    )
+    val xpWidth: i32 = draw.text_width("XP BANK", 2)
+    draw.draw_int(
+        constants.SCREEN_WIDTH / 2 + xpWidth / 2 + 18,
+        840,
+        st.progress.xp,
+        2,
+        255 as u8,
+        206 as u8,
+        92 as u8,
+        255 as u8
+    )
+}

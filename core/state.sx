@@ -1,0 +1,467 @@
+val sdl = use("sdl.sx")
+
+pub extern type Player = {
+    x: mut f32
+    y: mut f32
+    dirX: mut f32
+    dirY: mut f32
+    planeX: mut f32
+    planeY: mut f32
+    w: mut f32
+    h: mut f32
+    speed: mut f32
+    rotSpeed: mut f32
+}
+
+pub extern type Enemy = {
+    x: mut f32
+    y: mut f32
+    health: mut i32
+    alive: mut i32
+    shootTimer: mut f32
+}
+
+pub extern type Bullet = {
+    x: mut f32
+    y: mut f32
+    dx: mut f32
+    dy: mut f32
+    alive: mut i32
+    isPlayer: mut i32
+    animTime: mut f32
+    damage: mut i32
+    weapon: mut i32
+}
+
+pub type WallTexture = {
+    tex: mut ref void
+    w: mut i32
+    h: mut i32
+}
+
+pub type TextureSize = {
+    w: mut i32
+    h: mut i32
+}
+
+pub type SpawnPoint = {
+    x: mut f32
+    y: mut f32
+}
+
+pub type BrushBounds = {
+    minX: mut f32
+    minY: mut f32
+    minZ: mut f32
+    maxX: mut f32
+    maxY: mut f32
+    maxZ: mut f32
+    hasFace: mut bool
+    texture: [128]u8
+}
+
+pub type Tree = {
+    x: mut f32
+    y: mut f32
+    scale: mut f32
+}
+
+pub type HealthPickup = {
+    x: mut f32
+    y: mut f32
+    active: mut i32
+    respawn: mut f32
+    bob: mut f32
+}
+
+pub type XpOrb = {
+    x: mut f32
+    y: mut f32
+    value: mut i32
+    active: mut i32
+    phase: mut f32
+}
+
+pub type Progress = {
+    magic: mut u32
+    version: mut u32
+    checksum: mut u32
+    bestWave: mut i32
+    xp: mut i32
+    totalXp: mut i32
+    shotgun: mut i32
+    plasma: mut i32
+    healthLevel: mut i32
+    damageLevel: mut i32
+    fireRateLevel: mut i32
+    speedLevel: mut i32
+}
+
+pub type Star = {
+    angle: mut f32
+    altitude: mut f32
+    brightness: mut f32
+    phase: mut f32
+}
+
+pub type Billboard = {
+    kind: mut i32
+    index: mut i32
+    distance: mut f32
+}
+
+pub type WallSpan = {
+    active: mut i32
+    start_x: mut i32
+    end_x: mut i32
+    cell_x: mut i32
+    cell_y: mut i32
+    side: mut i32
+    face_sign: mut i32
+}
+
+pub type ColumnInfo = {
+    top: mut f32
+    bottom: mut f32
+    tex: mut f32
+    shade: mut u8
+}
+
+pub type Game = {
+    map: mut [32][32]i32
+    wallTextures: mut [3]WallTexture
+    enemySpawns: mut [10]SpawnPoint
+    player: mut Player
+    playerHealth: mut i32
+    shootCooldown: mut f32
+    muzzleFlashTimer: mut f32
+    hitFlashTimer: mut f32
+    walkTime: mut f32
+    spawnX: mut f32
+    spawnY: mut f32
+    spawnAngle: mut f32
+    spawnFound: mut bool
+    enemySpawnCount: mut i32
+    enemies_buf: mut ref void
+    bullets_buf: mut ref void
+    zbuf: mut ref void
+    enemyTexW: mut i32
+    enemyTexH: mut i32
+    gunTexW: mut i32
+    gunTexH: mut i32
+    g_renderer: mut ref void
+    g_enemyTex: mut ref void
+    g_gunTex: mut ref void
+    g_bulletTex: mut ref void
+    bulletTexW: mut i32
+    bulletTexH: mut i32
+    g_src_rect: mut ref sdl.SDL_Rect
+    g_dst_rect: mut ref sdl.SDL_Rect
+    g_aux_rect: mut ref sdl.SDL_Rect
+    g_columns: mut ref void
+    g_vertices: mut ref void
+    g_indices: mut ref void
+    g_treeTex: mut ref void
+    g_healthTex: mut ref void
+    trees: mut [20]Tree
+    treeCount: mut i32
+    healthPickups: mut [6]HealthPickup
+    stars: mut [160]Star
+    starCount: mut i32
+    rng: mut u32
+    pitch: mut f32
+    footstepTimer: mut f32
+    gameTime: mut f32
+    screenshotCounter: mut i32
+    g_shootSound: mut ref void
+    g_enemyShootSound: mut ref void
+    g_hitSound: mut ref void
+    g_hurtSound: mut ref void
+    g_pickupSound: mut ref void
+    g_footstepSound: mut ref void
+    g_machineGunTex: mut ref void
+    g_shotgunTex: mut ref void
+    g_shotgunReload1Tex: mut ref void
+    g_shotgunReload2Tex: mut ref void
+    g_plasmaTex: mut ref void
+    g_boothTex: mut ref void
+    boothTexW: mut i32
+    boothTexH: mut i32
+    xpOrbs: mut [96]XpOrb
+    progress: mut Progress
+    gameState: mut i32
+    wave: mut i32
+    waveTarget: mut i32
+    waveKilled: mut i32
+    waveSpawned: mut i32
+    waveIntermission: mut f32
+    boothX: mut f32
+    boothY: mut f32
+    boothFound: mut bool
+    playerZ: mut f32
+    playerVZ: mut f32
+    onGround: mut bool
+    currentWeapon: mut i32
+    weaponEquip: mut f32
+    shotgunReloadTimer: mut f32
+    shotgunReloadStage: mut i32
+    relativeMouseMode: mut i32
+    quitRequested: mut bool
+    g_shootShotgunSound: mut ref void
+    g_shootPlasmaSound: mut ref void
+    g_switchMachineSound: mut ref void
+    g_switchShotgunSound: mut ref void
+    g_switchPlasmaSound: mut ref void
+    g_reloadShotgun1Sound: mut ref void
+    g_reloadShotgun2Sound: mut ref void
+    g_jumpSound: mut ref void
+    g_xpSound: mut ref void
+    g_buySound: mut ref void
+    g_clickSound: mut ref void
+    g_waveSound: mut ref void
+    g_deathSound: mut ref void
+    inputMouseX: mut i32
+    inputMouseY: mut i32
+    inputClick: mut bool
+    inputEPressed: mut bool
+    inputEscapePressed: mut bool
+    inputEnterPressed: mut bool
+    inputSpacePressed: mut bool
+    inputF12Pressed: mut bool
+    inputNum1: mut bool
+    inputNum2: mut bool
+    inputNum3: mut bool
+    inputNum4: mut bool
+    inputNum5: mut bool
+    inputNum6: mut bool
+    prevE: mut u8
+    prevEscape: mut u8
+    prevEnter: mut u8
+    prevSpace: mut u8
+    prevF12: mut u8
+    prevNum1: mut u8
+    prevNum2: mut u8
+    prevNum3: mut u8
+    prevNum4: mut u8
+    prevNum5: mut u8
+    prevNum6: mut u8
+    prevMouseDown: mut bool
+    uiMouseX: mut i32
+    uiMouseY: mut i32
+}
+
+pub val gameData: mut Game = {
+    map: @zeroed,
+    wallTextures: @zeroed,
+    enemySpawns: @zeroed,
+    player: {
+        x: 96.0,
+        y: 96.0,
+        dirX: 1.0,
+        dirY: 0.0,
+        planeX: 0.0,
+        planeY: 0.66,
+        w: 8.0,
+        h: 8.0,
+        speed: 300.0,
+        rotSpeed: 3.0
+    },
+    playerHealth: 100,
+    shootCooldown: 0.0,
+    muzzleFlashTimer: 0.0,
+    hitFlashTimer: 0.0,
+    walkTime: 0.0,
+    spawnX: 96.0,
+    spawnY: 96.0,
+    spawnAngle: 0.0,
+    spawnFound: false,
+    enemySpawnCount: 0,
+    enemies_buf: none,
+    bullets_buf: none,
+    zbuf: none,
+    enemyTexW: 1,
+    enemyTexH: 1,
+    gunTexW: 1,
+    gunTexH: 1,
+    g_renderer: none,
+    g_enemyTex: none,
+    g_gunTex: none,
+    g_bulletTex: none,
+    bulletTexW: 128,
+    bulletTexH: 32,
+    g_src_rect: none,
+    g_dst_rect: none,
+    g_aux_rect: none,
+    g_columns: none,
+    g_vertices: none,
+    g_indices: none,
+    g_treeTex: none,
+    g_healthTex: none,
+    trees: @zeroed,
+    treeCount: 0,
+    healthPickups: @zeroed,
+    stars: @zeroed,
+    starCount: 0,
+    rng: 0x9E3779B9,
+    pitch: 0.0,
+    footstepTimer: 0.0,
+    gameTime: 0.0,
+    screenshotCounter: 0,
+    g_shootSound: none,
+    g_enemyShootSound: none,
+    g_hitSound: none,
+    g_hurtSound: none,
+    g_pickupSound: none,
+    g_footstepSound: none,
+    g_machineGunTex: none,
+    g_shotgunTex: none,
+    g_shotgunReload1Tex: none,
+    g_shotgunReload2Tex: none,
+    g_plasmaTex: none,
+    g_boothTex: none,
+    boothTexW: 1,
+    boothTexH: 1,
+    xpOrbs: @zeroed,
+    progress: @zeroed,
+    gameState: 0,
+    wave: 1,
+    waveTarget: 4,
+    waveKilled: 0,
+    waveSpawned: 0,
+    waveIntermission: 0.0,
+    boothX: 0.0,
+    boothY: 0.0,
+    boothFound: false,
+    playerZ: 0.0,
+    playerVZ: 0.0,
+    onGround: true,
+    currentWeapon: 0,
+    weaponEquip: 1.0,
+    shotgunReloadTimer: 0.0,
+    shotgunReloadStage: 0,
+    relativeMouseMode: 0,
+    quitRequested: false,
+    g_shootShotgunSound: none,
+    g_shootPlasmaSound: none,
+    g_switchMachineSound: none,
+    g_switchShotgunSound: none,
+    g_switchPlasmaSound: none,
+    g_reloadShotgun1Sound: none,
+    g_reloadShotgun2Sound: none,
+    g_jumpSound: none,
+    g_xpSound: none,
+    g_buySound: none,
+    g_clickSound: none,
+    g_waveSound: none,
+    g_deathSound: none,
+    inputMouseX: 0,
+    inputMouseY: 0,
+    inputClick: false,
+    inputEPressed: false,
+    inputEscapePressed: false,
+    inputEnterPressed: false,
+    inputSpacePressed: false,
+    inputF12Pressed: false,
+    inputNum1: false,
+    inputNum2: false,
+    inputNum3: false,
+    inputNum4: false,
+    inputNum5: false,
+    inputNum6: false,
+    prevE: 0,
+    prevEscape: 0,
+    prevEnter: 0,
+    prevSpace: 0,
+    prevF12: 0,
+    prevNum1: 0,
+    prevNum2: 0,
+    prevNum3: 0,
+    prevNum4: 0,
+    prevNum5: 0,
+    prevNum6: 0,
+    prevMouseDown: false,
+    uiMouseX: 0,
+    uiMouseY: 0,
+}
+
+pub fn game() mut ref Game = {
+    return @addr(gameData)
+}
+
+pub fn get_enemy(i: i32) mut ref Enemy = {
+    return trust @ptradd(gameData.enemies_buf, (i as usize) * @sizeof(Enemy)) as mut ref Enemy
+}
+
+pub fn get_bullet(i: i32) mut ref Bullet = {
+    return trust @ptradd(gameData.bullets_buf, (i as usize) * @sizeof(Bullet)) as mut ref Bullet
+}
+
+pub fn wall_texture(index: i32) mut ref WallTexture = {
+    return trust @ptradd(
+        gameData.wallTextures as ref WallTexture,
+        (index as usize) * @sizeof(WallTexture)
+    ) as mut ref WallTexture
+}
+
+pub fn enemy_spawn(index: i32) mut ref SpawnPoint = {
+    return trust @ptradd(
+        gameData.enemySpawns as ref SpawnPoint,
+        (index as usize) * @sizeof(SpawnPoint)
+    ) as mut ref SpawnPoint
+}
+
+pub fn column_info(index: i32) mut ref ColumnInfo = {
+    return trust @ptradd(
+        gameData.g_columns,
+        (index as usize) * @sizeof(ColumnInfo)
+    ) as mut ref ColumnInfo
+}
+
+pub fn vertex_at(index: i32) mut ref sdl.SDL_Vertex = {
+    return trust @ptradd(
+        gameData.g_vertices,
+        (index as usize) * @sizeof(sdl.SDL_Vertex)
+    ) as mut ref sdl.SDL_Vertex
+}
+
+pub fn write_index(index: i32, value: i32) void = trust {
+    @store32(
+        @ptradd(gameData.g_indices, (index as usize) * @sizeof(i32)) as ref u32,
+        value as u32
+    )
+}
+
+pub fn tree_at(index: i32) mut ref Tree = {
+    return trust @ptradd(
+        gameData.trees as ref Tree,
+        (index as usize) * @sizeof(Tree)
+    ) as mut ref Tree
+}
+
+pub fn pickup_at(index: i32) mut ref HealthPickup = {
+    return trust @ptradd(
+        gameData.healthPickups as ref HealthPickup,
+        (index as usize) * @sizeof(HealthPickup)
+    ) as mut ref HealthPickup
+}
+
+pub fn xp_orb_at(index: i32) mut ref XpOrb = {
+    return trust @ptradd(
+        gameData.xpOrbs as ref XpOrb,
+        (index as usize) * @sizeof(XpOrb)
+    ) as mut ref XpOrb
+}
+
+pub fn star_at(index: i32) mut ref Star = {
+    return trust @ptradd(
+        gameData.stars as ref Star,
+        (index as usize) * @sizeof(Star)
+    ) as mut ref Star
+}
+
+pub fn billboard_at(list: ref Billboard, index: i32) mut ref Billboard = {
+    return trust @ptradd(
+        list as ref Billboard,
+        (index as usize) * @sizeof(Billboard)
+    ) as mut ref Billboard
+}

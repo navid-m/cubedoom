@@ -1,0 +1,130 @@
+val fs        = use("std/fs")
+val constants = use("constants.sx")
+val state     = use("state.sx")
+
+pub fn max_health() i32 = {
+    val st: ref state.Game = state.game()
+    return 100 + st.progress.healthLevel * 25
+}
+
+pub fn progress_checksum() u32 = {
+    val st: ref state.Game = state.game()
+    val hash: mut u32 = 2166136261 as u32
+    hash = (hash ^ (st.progress.bestWave as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.xp as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.totalXp as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.shotgun as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.plasma as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.healthLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.damageLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.fireRateLevel as u32)) * 16777619 as u32
+    hash = (hash ^ (st.progress.speedLevel as u32)) * 16777619 as u32
+    return hash
+}
+
+pub fn progress_reset() void = {
+    val st: mut ref state.Game = state.game()
+    st.progress.magic = constants.PROGRESS_MAGIC
+    st.progress.version = constants.PROGRESS_VERSION
+    st.progress.checksum = 0
+    st.progress.bestWave = 0
+    st.progress.xp = 0
+    st.progress.totalXp = 0
+    st.progress.shotgun = 0
+    st.progress.plasma = 0
+    st.progress.healthLevel = 0
+    st.progress.damageLevel = 0
+    st.progress.fireRateLevel = 0
+    st.progress.speedLevel = 0
+}
+
+pub fn save_progress() bool = trust {
+    val st: mut ref state.Game = state.game()
+    st.progress.magic = constants.PROGRESS_MAGIC
+    st.progress.version = constants.PROGRESS_VERSION
+    st.progress.checksum = progress_checksum()
+
+    val size: i32 = @sizeof(state.Progress) as i32
+    val raw: mut [64]u8 = @zeroed
+    @memcpy(raw as ref void, @addr(st.progress) as ref void, size as usize)
+    for i = 0, i < size, i++ {
+        val mixed: u32 = (i as u32) * 73 as u32 + constants.PROGRESS_XOR
+        val key: u8 = (mixed & 255 as u32) as u8
+        val b: u8 = @load8(@ptradd(raw as ref u8, i as usize))
+        @store8(@ptradd(raw as ref u8, i as usize), b ^ key)
+    }
+    return fs.write_all_bytes(constants.PROGRESS_PATH, raw as ref void, size as i64)
+}
+
+pub fn load_progress() void = trust {
+    val st: mut ref state.Game = state.game()
+    progress_reset()
+
+    val size: mut i64 = 0
+    match fs.file_size(constants.PROGRESS_PATH) {
+        none => {
+            return
+        }
+        some found => {
+            size = found
+        }
+    }
+    if size < (@sizeof(state.Progress) as i64) {
+        return
+    }
+
+    match fs.read_all_raw(constants.PROGRESS_PATH) {
+        none => {
+            return
+        }
+        some data => {
+            val count: i32 = @sizeof(state.Progress) as i32
+            val raw: mut [64]u8 = @zeroed
+            @memcpy(raw as ref void, data as ref void, count as usize)
+            for i = 0, i < count, i++ {
+                val mixed: u32 = (i as u32) * 73 as u32 + constants.PROGRESS_XOR
+                val key: u8 = (mixed & 255 as u32) as u8
+                val b: u8 = @load8(@ptradd(raw as ref u8, i as usize))
+                @store8(@ptradd(raw as ref u8, i as usize), b ^ key)
+            }
+            @memcpy(@addr(st.progress) as ref void, raw as ref void, count as usize)
+            @free(data as ref void)
+        }
+    }
+
+    if st.progress.magic != constants.PROGRESS_MAGIC || st.progress.version != constants.PROGRESS_VERSION || st.progress.checksum != progress_checksum() {
+        progress_reset()
+        return
+    }
+
+    if st.progress.bestWave < 0 {
+        st.progress.bestWave = 0
+    }
+    if st.progress.xp < 0 {
+        st.progress.xp = 0
+    }
+    if st.progress.healthLevel < 0 {
+        st.progress.healthLevel = 0
+    }
+    if st.progress.healthLevel > constants.MAX_HEALTH_LEVEL {
+        st.progress.healthLevel = constants.MAX_HEALTH_LEVEL
+    }
+    if st.progress.damageLevel < 0 {
+        st.progress.damageLevel = 0
+    }
+    if st.progress.damageLevel > constants.MAX_DAMAGE_LEVEL {
+        st.progress.damageLevel = constants.MAX_DAMAGE_LEVEL
+    }
+    if st.progress.fireRateLevel < 0 {
+        st.progress.fireRateLevel = 0
+    }
+    if st.progress.fireRateLevel > constants.MAX_FIRE_RATE_LEVEL {
+        st.progress.fireRateLevel = constants.MAX_FIRE_RATE_LEVEL
+    }
+    if st.progress.speedLevel < 0 {
+        st.progress.speedLevel = 0
+    }
+    if st.progress.speedLevel > constants.MAX_SPEED_LEVEL {
+        st.progress.speedLevel = constants.MAX_SPEED_LEVEL
+    }
+}

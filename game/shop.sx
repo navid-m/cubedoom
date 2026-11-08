@@ -1,0 +1,91 @@
+val audio       = use("../core/audio.sx")
+val constants   = use("../core/constants.sx")
+val progression = use("../core/progression.sx")
+val state       = use("../core/state.sx")
+
+pub fn shop_cost(item: i32) i32 = {
+    val st: ref state.Game = state.game()
+    if item == 0 {
+        return 150
+    }
+    if item == 1 {
+        return 400
+    }
+    if item == 2 {
+        return 80 + st.progress.healthLevel * 60
+    }
+    if item == 3 {
+        return 120 + st.progress.damageLevel * 80
+    }
+    if item == 4 {
+        return 180 + st.progress.fireRateLevel * 120
+    }
+    if item == 5 {
+        return 140 + st.progress.speedLevel * 100
+    }
+    return 0
+}
+
+pub fn shop_maxed(item: i32) bool = {
+    val st: ref state.Game = state.game()
+    if item == 2 {
+        return st.progress.healthLevel >= constants.MAX_HEALTH_LEVEL
+    }
+    if item == 3 {
+        return st.progress.damageLevel >= constants.MAX_DAMAGE_LEVEL
+    }
+    if item == 4 {
+        return st.progress.fireRateLevel >= constants.MAX_FIRE_RATE_LEVEL
+    }
+    if item == 5 {
+        return st.progress.speedLevel >= constants.MAX_SPEED_LEVEL
+    }
+    return false
+}
+
+pub fn shop_owned(item: i32) bool = {
+    val st: ref state.Game = state.game()
+    if item == 0 {
+        return st.progress.shotgun != 0
+    }
+    if item == 1 {
+        return st.progress.plasma != 0
+    }
+    return false
+}
+
+pub fn try_buy(item: i32) void = trust {
+    val st: mut ref state.Game = state.game()
+    if item < 0 || item > 5 {
+        return
+    }
+    if shop_owned(item) || item > 1 && shop_maxed(item) {
+        audio.play_sound(st.g_clickSound)
+        return
+    }
+    val cost: i32 = shop_cost(item)
+    if st.progress.xp < cost {
+        audio.play_sound(st.g_clickSound)
+        return
+    }
+    st.progress.xp -= cost
+    if item == 0 {
+        st.progress.shotgun = 1
+    } elif item == 1 {
+        st.progress.plasma = 1
+    } elif item == 2 {
+        st.progress.healthLevel++
+        st.playerHealth += 25
+        if st.playerHealth > progression.max_health() {
+            st.playerHealth = progression.max_health()
+        }
+    } elif item == 3 {
+        st.progress.damageLevel++
+    } elif item == 4 {
+        st.progress.fireRateLevel++
+    } elif item == 5 {
+        st.progress.speedLevel++
+    }
+    progression.save_progress()
+    audio.play_sound(st.g_buySound)
+}

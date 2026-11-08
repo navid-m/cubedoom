@@ -1,0 +1,153 @@
+val audio       = use("../core/audio.sx")
+val constants   = use("../core/constants.sx")
+val draw        = use("../core/draw.sx")
+val platform    = use("../core/platform.sx")
+val progression = use("../core/progression.sx")
+val sdl         = use("../core/sdl.sx")
+val state       = use("../core/state.sx")
+
+pub fn pause_button_x() i32 = {
+    return constants.SCREEN_WIDTH / 2 - 190
+}
+
+pub fn pause_resume_y() i32 = {
+    return 480
+}
+
+pub fn pause_menu_y() i32 = {
+    return 580
+}
+
+pub fn update_pause() void = trust {
+    val st: mut ref state.Game = state.game()
+    if st.inputClick {
+        if draw.point_in(
+            pause_button_x(),
+            pause_resume_y(),
+            380,
+            76,
+            st.inputMouseX,
+            st.inputMouseY
+        ) {
+            audio.play_sound(st.g_clickSound)
+            st.gameState = constants.STATE_PLAYING
+            platform.set_relative_mouse(true)
+            return
+        }
+        if draw.point_in(
+            pause_button_x(),
+            pause_menu_y(),
+            380,
+            76,
+            st.inputMouseX,
+            st.inputMouseY
+        ) {
+            audio.play_sound(st.g_clickSound)
+            progression.save_progress()
+            st.gameState = constants.STATE_MENU
+            platform.set_relative_mouse(false)
+            return
+        }
+    }
+    if st.inputEscapePressed || st.inputEnterPressed || st.inputEPressed {
+        audio.play_sound(st.g_clickSound)
+        st.gameState = constants.STATE_PLAYING
+        platform.set_relative_mouse(true)
+    }
+}
+
+pub fn render_pause() void = trust {
+    val st: mut ref state.Game = state.game()
+    sdl.SDL_SetRenderDrawColor(st.g_renderer, 4 as u8, 6 as u8, 10 as u8, 255 as u8)
+    sdl.SDL_RenderClear(st.g_renderer)
+
+    for band = 0, band < 16, band++ {
+        val t: f32 = (band as f32) / 15.0
+        val cr: u8 = (7.0 + 9.0 * t) as u8
+        val cg: u8 = (9.0 + 12.0 * t) as u8
+        val cb: u8 = (16.0 + 20.0 * t) as u8
+        sdl.SDL_SetRenderDrawColor(st.g_renderer, cr, cg, cb, 255 as u8)
+        st.g_aux_rect.x = 0
+        st.g_aux_rect.y = band * constants.SCREEN_HEIGHT / 16
+        st.g_aux_rect.w = constants.SCREEN_WIDTH
+        st.g_aux_rect.h = constants.SCREEN_HEIGHT / 16 + 1
+        sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+
+    draw.draw_panel(190, 120, 900, 700, 8 as u8, 11 as u8, 16 as u8, 225 as u8)
+    draw.draw_border(190, 120, 900, 700, 3, 96 as u8, 140 as u8, 188 as u8, 255 as u8)
+
+    draw.draw_glow(constants.SCREEN_WIDTH / 2, 240, 210, 76 as u8, 170 as u8, 255 as u8, 38 as u8)
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        190,
+        "PAUSED",
+        10,
+        150 as u8,
+        222 as u8,
+        255 as u8,
+        255 as u8
+    )
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        300,
+        "HEHEHEH",
+        4,
+        140 as u8,
+        156 as u8,
+        174 as u8,
+        255 as u8
+    )
+
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        380,
+        "WAVE",
+        3,
+        255 as u8,
+        196 as u8,
+        72 as u8,
+        255 as u8
+    )
+    val waveWidth: i32 = draw.text_width("WAVE", 3)
+    draw.draw_int(
+        constants.SCREEN_WIDTH / 2 + waveWidth / 2 + 18,
+        380,
+        st.wave,
+        3,
+        255 as u8,
+        236 as u8,
+        154 as u8,
+        255 as u8
+    )
+
+    val hoverResume: bool = draw.point_in(
+        pause_button_x(),
+        pause_resume_y(),
+        380,
+        76,
+        st.uiMouseX,
+        st.uiMouseY
+    )
+    val hoverMenu: bool = draw.point_in(
+        pause_button_x(),
+        pause_menu_y(),
+        380,
+        76,
+        st.uiMouseX,
+        st.uiMouseY
+    )
+    draw.draw_button(pause_button_x(), pause_resume_y(), 380, 76, "RESUME", hoverResume)
+    draw.draw_button(pause_button_x(), pause_menu_y(), 380, 76, "MAIN MENU", hoverMenu)
+
+    draw.draw_text_centered(
+        constants.SCREEN_WIDTH / 2,
+        770,
+        "ESC TO RESUME    F12 FOR SCREENSHOT",
+        2,
+        120 as u8,
+        138 as u8,
+        158 as u8,
+        255 as u8
+    )
+}

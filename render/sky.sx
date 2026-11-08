@@ -1,0 +1,127 @@
+val constants = use("../core/constants.sx")
+val draw      = use("../core/draw.sx")
+val math      = use("../core/math.sx")
+val sdl       = use("../core/sdl.sx")
+val state     = use("../core/state.sx")
+
+pub fn normalize_angle(angle: f32) f32 = {
+    val value: mut f32 = angle
+    for {
+        if value > constants.PI {
+            value -= 2.0 * constants.PI
+        } elif value < -constants.PI {
+            value += 2.0 * constants.PI
+        } else {
+            break
+        }
+    }
+    return value
+}
+
+pub fn draw_sky(horizon: f32, time: f32) void = {
+    val st: mut ref state.Game = state.game()
+    val bottom: mut i32 = horizon as i32
+    if bottom < 0 {
+        bottom = 0
+    }
+    if bottom > constants.SCREEN_HEIGHT {
+        bottom = constants.SCREEN_HEIGHT
+    }
+
+    if bottom > 0 {
+        for band = 0, band < 20, band++ {
+            val t: f32 = (band as f32) / 19.0
+            val r: u8 = (7.0 + 24.0 * t) as u8
+            val g: u8 = (9.0 + 17.0 * t) as u8
+            val b: u8 = (26.0 + 28.0 * t) as u8
+            trust sdl.SDL_SetRenderDrawColor(st.g_renderer, r, g, b, 255 as u8)
+            val y0: i32 = bottom * band / 20
+            val y1: i32 = bottom * (band + 1) / 20
+            st.g_aux_rect.x = 0
+            st.g_aux_rect.y = y0
+            st.g_aux_rect.w = constants.SCREEN_WIDTH
+            st.g_aux_rect.h = y1 - y0
+            trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        }
+    }
+
+    val yaw: f32 = trust sdl.atan2f(st.player.dirY, st.player.dirX)
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 1 as i32)
+    for index = 0, index < st.starCount, index++ {
+        val star: ref state.Star = state.star_at(index)
+        val relative: f32 = normalize_angle(star.angle - yaw)
+        if trust sdl.fabsf(relative) < constants.FOV_HALF + 0.12 {
+            val sx: i32 = constants.SCREEN_WIDTH / 2 + ((relative / constants.FOV_HALF) * (constants.SCREEN_WIDTH as f32 / 2.0)) as i32
+            val sy: i32 = bottom - ((star.altitude * (bottom as f32)) as i32)
+            val twinkle: f32 = 0.62 + 0.38 * trust sdl.sinf(time * 2.0 + star.phase)
+            val brightness: u8 = (star.brightness * twinkle) as u8
+            val size: mut i32 = 1
+            if star.brightness > 205.0 {
+                size = 2
+            }
+            trust sdl.SDL_SetRenderDrawColor(
+                st.g_renderer,
+                brightness,
+                brightness,
+                255 as u8,
+                220 as u8
+            )
+            st.g_aux_rect.x = sx
+            st.g_aux_rect.y = sy
+            st.g_aux_rect.w = size
+            st.g_aux_rect.h = size
+            trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+        }
+    }
+
+    val sunAngle: f32 = 2.15
+    val sunAltitude: f32 = 0.76
+    val sunRelative: f32 = normalize_angle(sunAngle - yaw)
+    if trust sdl.fabsf(sunRelative) < constants.FOV_HALF + 0.25 {
+        val sunX: i32 = constants.SCREEN_WIDTH / 2 + ((sunRelative / constants.FOV_HALF) * (constants.SCREEN_WIDTH as f32 / 2.0)) as i32
+        val sunY: i32 = bottom - ((sunAltitude * (bottom as f32)) as i32)
+        draw.draw_glow(sunX, sunY, 48, 255 as u8, 210 as u8, 140 as u8, 70 as u8)
+        draw.draw_glow(sunX, sunY, 18, 255 as u8, 245 as u8, 210 as u8, 150 as u8)
+        draw.draw_flare_chain(sunX, sunY, 0.65)
+    }
+
+    trust sdl.SDL_SetRenderDrawBlendMode(st.g_renderer, 0 as i32)
+}
+
+pub fn draw_ground(horizon: f32) void = {
+    val st: mut ref state.Game = state.game()
+    val top: mut i32 = horizon as i32
+    if top < 0 {
+        top = 0
+    }
+    if top >= constants.SCREEN_HEIGHT {
+        return
+    }
+
+    for band = 0, band < 18, band++ {
+        val t: f32 = (band as f32) / 17.0
+        val r: u8 = (48.0 - 32.0 * t) as u8
+        val g: u8 = (44.0 - 29.0 * t) as u8
+        val b: u8 = (41.0 - 27.0 * t) as u8
+        trust sdl.SDL_SetRenderDrawColor(st.g_renderer, r, g, b, 255 as u8)
+        val y0: i32 = top + (constants.SCREEN_HEIGHT - top) * band / 18
+        val y1: i32 = top + (constants.SCREEN_HEIGHT - top) * (band + 1) / 18
+        st.g_aux_rect.x = 0
+        st.g_aux_rect.y = y0
+        st.g_aux_rect.w = constants.SCREEN_WIDTH
+        st.g_aux_rect.h = y1 - y0
+        trust sdl.SDL_RenderFillRect(st.g_renderer, st.g_aux_rect)
+    }
+}
+
+pub fn init_sky() void = {
+    val st: mut ref state.Game = state.game()
+    st.starCount = constants.MAX_STARS
+    for index = 0, index < constants.MAX_STARS, index++ {
+        val star: mut ref state.Star = state.star_at(index)
+        star.angle = math.rand_unit() * 2.0 * constants.PI
+        star.altitude = 0.06 + math.rand_unit() * 0.88
+        star.brightness = 90.0 + math.rand_unit() * 165.0
+        star.phase = math.rand_unit() * 2.0 * constants.PI
+    }
+}
