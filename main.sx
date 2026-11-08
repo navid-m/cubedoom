@@ -29,9 +29,8 @@ val ENEMY_SHOOT_INTERVAL: f32 = 2.0
 val PI: f32 = 3.14159265
 val FOV_HALF: f32 = 0.5838
 val WALL_UNITS: f32 = 128.0
-val TEX_WORLD_SIZE: f32 = 32.0
-val CELL_TEX_REPEATS: f32 = 2.0
-val WALL_TEX_REPEATS: i32 = 4
+val CELL_TEX_REPEATS: f32 = 1.0
+val WALL_TEX_REPEATS: i32 = 2
 val SPRINT_MULTIPLIER: f32 = 1.7
 
 extern type SDL_Rect = {
@@ -44,6 +43,24 @@ extern type SDL_Rect = {
 extern type SDL_Event = {
     type_value: mut u32
     padding: mut [52]u8
+}
+
+extern type SDL_FPoint = {
+    x: mut f32
+    y: mut f32
+}
+
+extern type SDL_Color = {
+    r: mut u8
+    g: mut u8
+    b: mut u8
+    a: mut u8
+}
+
+extern type SDL_Vertex = {
+    position: mut SDL_FPoint
+    color: mut SDL_Color
+    tex_coord: mut SDL_FPoint
 }
 
 extern type Player = {
@@ -131,6 +148,23 @@ type Billboard = {
     distance: mut f32
 }
 
+type WallSpan = {
+    active: mut i32
+    start_x: mut i32
+    end_x: mut i32
+    cell_x: mut i32
+    cell_y: mut i32
+    side: mut i32
+    face_sign: mut i32
+}
+
+type ColumnInfo = {
+    top: mut f32
+    bottom: mut f32
+    tex: mut f32
+    shade: mut u8
+}
+
 extern (C, header) fn SDL_Init(flags: u32) i32 = "SDL_Init"
 extern (C, header) fn SDL_CreateWindow(
     title: ref char,
@@ -175,6 +209,14 @@ extern (C, header) fn SDL_RenderCopy(
     srcrect: ref void,
     dstrect: ref void
 ) i32 = "SDL_RenderCopy"
+extern (C, header) fn SDL_RenderGeometry(
+    renderer: ref void,
+    texture: ref void,
+    vertices: ref SDL_Vertex,
+    num_vertices: i32,
+    indices: ref i32,
+    num_indices: i32
+) i32 = "SDL_RenderGeometry"
 extern (C, header) fn SDL_SetTextureBlendMode(
     texture: ref void,
     blendMode: i32
@@ -203,6 +245,7 @@ extern (C, header) fn SDL_GetRelativeMouseState(
     y: ref i32
 ) u32 = "SDL_GetRelativeMouseState"
 extern (C, header) fn SDL_GetMouseState(x: ref i32, y: ref i32) u32 = "SDL_GetMouseState"
+extern (C, header) fn SDL_SetHint(name: ref u8, value: ref u8) i32 = "SDL_SetHint"
 
 extern (C, header) fn Mix_OpenAudio(
     freq: i32,
@@ -269,6 +312,9 @@ val bulletTexH: mut i32 = 32
 val g_src_rect: mut ref SDL_Rect = none
 val g_dst_rect: mut ref SDL_Rect = none
 val g_aux_rect: mut ref SDL_Rect = none
+val g_columns: mut ref void = none
+val g_vertices: mut ref void = none
+val g_indices: mut ref void = none
 val g_treeTex: mut ref void = none
 val g_healthTex: mut ref void = none
 val trees: mut [20]Tree = @zeroed
@@ -307,6 +353,27 @@ fn enemy_spawn(index: i32) mut ref SpawnPoint = {
         enemySpawns as ref SpawnPoint,
         (index as usize) * @sizeof(SpawnPoint)
     ) as mut ref SpawnPoint
+}
+
+fn column_info(index: i32) mut ref ColumnInfo = {
+    return trust @ptradd(
+        g_columns,
+        (index as usize) * @sizeof(ColumnInfo)
+    ) as mut ref ColumnInfo
+}
+
+fn vertex_at(index: i32) mut ref SDL_Vertex = {
+    return trust @ptradd(
+        g_vertices,
+        (index as usize) * @sizeof(SDL_Vertex)
+    ) as mut ref SDL_Vertex
+}
+
+fn write_index(index: i32, value: i32) void = trust {
+    @store32(
+        @ptradd(g_indices, (index as usize) * @sizeof(i32)) as ref u32,
+        value as u32
+    )
 }
 
 fn tree_at(index: i32) mut ref Tree = {
@@ -1844,6 +1911,187 @@ fn wall_texture_for(id: i32) mut ref WallTexture = {
     return wall_texture(0)
 }
 
+fn wall_span_flush(span: mut ref WallSpan) void = trust {
+    if span.active == 0 {
+        return
+    }
+    span.active = 0
+
+    val spanWidth: i32 = span.end_x - span.start_x + 1
+    if spanWidth <= 0 {
+        return
+    }
+
+    val cellId: i32 = map_at(span.cell_x, span.cell_y)
+    val wall: ref WallTexture = wall_texture_for(cellId)
+
+    if wall.tex == none {
+        val column: ref ColumnInfo = column_info(span.start_x)
+        val clipTop: mut f32 = column.top
+        val clipBottom: mut f32 = column.bottom
+        if clipTop < 0.0 {
+            clipTop = 0.0
+        }
+        if clipBottom > (SCREEN_HEIGHT as f32) {
+            clipBottom = SCREEN_HEIGHT as f32
+        }
+        if clipBottom > clipTop {
+            SDL_SetRenderDrawColor(g_renderer, 255, 0, 0, 255)
+            g_aux_rect.x = span.start_x
+            g_aux_rect.y = clipTop as i32
+            g_aux_rect.w = spanWidth
+            g_aux_rect.h = (clipBottom - clipTop) as i32
+            SDL_RenderFillRect(g_renderer, g_aux_rect)
+        }
+        return
+    }
+
+    if spanWidth == 1 {
+        val column: ref ColumnInfo = column_info(span.start_x)
+        val wallHeight: f32 = column.bottom - column.top
+        val segHeight: f32 = wallHeight / (WALL_TEX_REPEATS as f32)
+        val uRaw: f32 = column.tex * CELL_TEX_REPEATS
+        val u: f32 = uRaw - (uRaw as i32) as f32
+
+        for segment = 0, segment < WALL_TEX_REPEATS, segment++ {
+            val segTop: f32 = column.top + segHeight * (segment as f32)
+            val segBottom: f32 = segTop + segHeight
+            val clipTop: mut f32 = segTop
+            val clipBottom: mut f32 = segBottom
+            if clipTop < 0.0 {
+                clipTop = 0.0
+            }
+            if clipBottom > (SCREEN_HEIGHT as f32) {
+                clipBottom = SCREEN_HEIGHT as f32
+            }
+            if clipBottom > clipTop {
+                val vTop: f32 = (clipTop - segTop) / segHeight
+                val vBottom: f32 = (clipBottom - segTop) / segHeight
+                val srcX: i32 = (u * (wall.w as f32)) as i32
+                val srcY: i32 = (vTop * (wall.h as f32)) as i32
+                val srcH: mut i32 = ((vBottom - vTop) * (wall.h as f32)) as i32
+                if srcH < 1 {
+                    srcH = 1
+                }
+                SDL_SetTextureColorMod(wall.tex, column.shade, column.shade, column.shade)
+                g_src_rect.x = srcX
+                g_src_rect.y = srcY
+                g_src_rect.w = 1
+                g_src_rect.h = srcH
+                g_dst_rect.x = span.start_x
+                g_dst_rect.y = clipTop as i32
+                g_dst_rect.w = 1
+                g_dst_rect.h = (clipBottom - clipTop) as i32
+                SDL_RenderCopy(
+                    g_renderer,
+                    wall.tex,
+                    g_src_rect as ref void,
+                    g_dst_rect as ref void
+                )
+            }
+        }
+        return
+    }
+
+    SDL_SetTextureColorMod(wall.tex, 255, 255, 255)
+
+    for segment = 0, segment < WALL_TEX_REPEATS, segment++ {
+        val vertexCount: mut i32 = 0
+        val indexCount: mut i32 = 0
+        val prevTop: mut i32 = 0
+        val prevBottom: mut i32 = 0
+
+        for x = span.start_x, x <= span.end_x, x++ {
+            val column: ref ColumnInfo = column_info(x)
+            val wallHeight: f32 = column.bottom - column.top
+            val segHeight: f32 = wallHeight / (WALL_TEX_REPEATS as f32)
+            val segTop: f32 = column.top + segHeight * (segment as f32)
+            val segBottom: f32 = segTop + segHeight
+
+            val clipTop: mut f32 = segTop
+            val clipBottom: mut f32 = segBottom
+            if clipTop < 0.0 {
+                clipTop = 0.0
+            }
+            if clipBottom > (SCREEN_HEIGHT as f32) {
+                clipBottom = SCREEN_HEIGHT as f32
+            }
+            if clipBottom < clipTop {
+                clipBottom = clipTop
+            }
+
+            val vTop: mut f32 = (clipTop - segTop) / segHeight
+            val vBottom: mut f32 = (clipBottom - segTop) / segHeight
+            if vTop < 0.0 {
+                vTop = 0.0
+            }
+            if vTop > 1.0 {
+                vTop = 1.0
+            }
+            if vBottom < 0.0 {
+                vBottom = 0.0
+            }
+            if vBottom > 1.0 {
+                vBottom = 1.0
+            }
+
+            val uRaw: f32 = column.tex * CELL_TEX_REPEATS
+            val u: f32 = uRaw - (uRaw as i32) as f32
+
+            val topVertex: mut ref SDL_Vertex = vertex_at(vertexCount)
+            topVertex.position.x = x as f32
+            topVertex.position.y = clipTop
+            topVertex.color.r = column.shade
+            topVertex.color.g = column.shade
+            topVertex.color.b = column.shade
+            topVertex.color.a = 255
+            topVertex.tex_coord.x = u
+            topVertex.tex_coord.y = vTop
+            vertexCount++
+
+            val bottomVertex: mut ref SDL_Vertex = vertex_at(vertexCount)
+            bottomVertex.position.x = x as f32
+            bottomVertex.position.y = clipBottom
+            bottomVertex.color.r = column.shade
+            bottomVertex.color.g = column.shade
+            bottomVertex.color.b = column.shade
+            bottomVertex.color.a = 255
+            bottomVertex.tex_coord.x = u
+            bottomVertex.tex_coord.y = vBottom
+            vertexCount++
+
+            if x > span.start_x {
+                write_index(indexCount, prevTop)
+                indexCount++
+                write_index(indexCount, prevBottom)
+                indexCount++
+                write_index(indexCount, vertexCount - 2)
+                indexCount++
+                write_index(indexCount, vertexCount - 2)
+                indexCount++
+                write_index(indexCount, prevBottom)
+                indexCount++
+                write_index(indexCount, vertexCount - 1)
+                indexCount++
+            }
+
+            prevTop = vertexCount - 2
+            prevBottom = vertexCount - 1
+        }
+
+        if indexCount > 0 {
+            SDL_RenderGeometry(
+                g_renderer,
+                wall.tex,
+                g_vertices as ref SDL_Vertex,
+                vertexCount,
+                g_indices as ref i32,
+                indexCount
+            )
+        }
+    }
+}
+
 pub fn main() i32 = {
     if !trust load_map() {
         trust @print("cubedoom: could not load {s}\n", {MAP_PATH})
@@ -1869,6 +2117,7 @@ pub fn main() i32 = {
     )
     g_renderer = renderer
     trust SDL_SetRelativeMouseMode(1 as i32)
+    trust SDL_SetHint("SDL_RENDER_SCALE_QUALITY", "1")
 
     trust Mix_OpenAudio(44100 as i32, C.AUDIO_S16SYS, 2 as i32, 1024 as i32)
     g_shootSound = trust Mix_LoadWAV("sounds/shoot.wav")
@@ -1909,6 +2158,9 @@ pub fn main() i32 = {
     g_src_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
     g_dst_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
     g_aux_rect = @alloc(@sizeof(SDL_Rect)) as ref SDL_Rect
+    g_columns = @alloc((SCREEN_WIDTH as usize) * @sizeof(ColumnInfo))
+    g_vertices = @alloc((SCREEN_WIDTH as usize) * 2 * @sizeof(SDL_Vertex))
+    g_indices = @alloc((SCREEN_WIDTH as usize) * 6 * @sizeof(i32))
 
     trust load_wall_texture(renderer, "textures/QUAKE101/tech08_2.png", 0)
     trust load_wall_texture(renderer, "textures/QUAKE101/dung01_1.png", 1)
@@ -2078,6 +2330,7 @@ pub fn main() i32 = {
 
             val pCX: f32 = player.x + 4.0
             val pCY: f32 = player.y + 4.0
+            val span: mut WallSpan = @zeroed
 
             val i: mut i32 = 0
             for i < SCREEN_WIDTH {
@@ -2167,78 +2420,41 @@ pub fn main() i32 = {
                 val hitX: f32 = pCX + rayDX * pWD * (TILE_SIZE as f32)
                 val hitY: f32 = pCY + rayDY * pWD * (TILE_SIZE as f32)
 
-                val wallPos: mut f32 = hitY - ((mY as f32) * (TILE_SIZE as f32))
+                val wallPos: mut f32 = hitY / (TILE_SIZE as f32) - (mY as f32)
                 if side == 1 {
-                    wallPos = hitX - ((mX as f32) * (TILE_SIZE as f32))
+                    wallPos = hitX / (TILE_SIZE as f32) - (mX as f32)
                 }
                 wallPos = wallPos - (wallPos as i32) as f32
                 if wallPos < 0.0 {
                     wallPos += 1.0
                 }
 
-                val cellId: i32 = map_at(mX, mY)
-                val wall: ref WallTexture = wall_texture_for(cellId)
-                if wall.tex != none {
-                    val texX: i32 = ((wallPos * CELL_TEX_REPEATS * (wall.w as f32)) as i32) % wall.w
-                    if texX >= 0 && texX < wall.w {
-                        trust SDL_SetTextureColorMod(wall.tex, r, r, r)
-                        val segH: f32 = unitH * (TEX_WORLD_SIZE / (TILE_SIZE as f32))
-                        for segment = 0, segment < WALL_TEX_REPEATS, segment++ {
-                            val segTop: f32 = wallTop + segH * (segment as f32)
-                            val segBottom: f32 = segTop + segH
-                            val clipTop: mut f32 = segTop
-                            val clipBottom: mut f32 = segBottom
-                            if clipTop < 0.0 {
-                                clipTop = 0.0
-                            }
-                            if clipBottom > (SCREEN_HEIGHT as f32) {
-                                clipBottom = SCREEN_HEIGHT as f32
-                            }
-                            if clipBottom > clipTop {
-                                val srcTop: i32 = ((clipTop - segTop) / segH * (wall.h as f32)) as i32
-                                val srcHeight: mut i32 = ((clipBottom - clipTop) / segH * (wall.h as f32)) as i32
-                                if srcHeight < 1 {
-                                    srcHeight = 1
-                                }
-                                g_src_rect.x = texX
-                                g_src_rect.y = srcTop
-                                g_src_rect.w = 1
-                                g_src_rect.h = srcHeight
-                                g_dst_rect.x = i
-                                g_dst_rect.y = clipTop as i32
-                                g_dst_rect.w = 1
-                                g_dst_rect.h = (clipBottom - clipTop) as i32
-                                trust SDL_RenderCopy(
-                                    g_renderer,
-                                    wall.tex,
-                                    g_src_rect as ref void,
-                                    g_dst_rect as ref void
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    trust SDL_SetRenderDrawColor(renderer, r, 0 as u8, 0 as u8, 255 as u8)
-                    val clipTop: mut f32 = wallTop
-                    val clipBottom: mut f32 = wallTop + wallH
-                    if clipTop < 0.0 {
-                        clipTop = 0.0
-                    }
-                    if clipBottom > (SCREEN_HEIGHT as f32) {
-                        clipBottom = SCREEN_HEIGHT as f32
-                    }
-                    if clipBottom > clipTop {
-                        g_aux_rect.x = i
-                        g_aux_rect.y = clipTop as i32
-                        g_aux_rect.w = 1
-                        g_aux_rect.h = (clipBottom - clipTop) as i32
-                        trust SDL_RenderFillRect(renderer, g_aux_rect)
-                    }
+                val faceSign: mut i32 = stepY
+                if side == 0 {
+                    faceSign = stepX
                 }
+                val sameWall: bool = span.active != 0 && span.cell_x == mX && span.cell_y == mY && span.side == side && span.face_sign == faceSign
+                if !sameWall {
+                    trust wall_span_flush(@addr(span))
+                    span.active = 1
+                    span.start_x = i
+                    span.cell_x = mX
+                    span.cell_y = mY
+                    span.side = side
+                    span.face_sign = faceSign
+                }
+                span.end_x = i
+
+                val column: mut ref ColumnInfo = column_info(i)
+                column.top = wallTop
+                column.bottom = wallTop + wallH
+                column.tex = wallPos
+                column.shade = r
 
                 i++
             }
 
+            trust wall_span_flush(@addr(span))
             trust render_billboards()
             render_gun(bobX, bobY, muzzleFlashTimer > 0.0)
             render_crosshair()

@@ -24,7 +24,7 @@ local TEX = {
     stone = "quake/dung01_1",
     metal = "quake/tech07_2",
     floor = "quake/floor01_5",
-    ceiling = "quake/tech07_2",
+    ceiling = "quake/tech08_2",
 }
 
 local MATERIAL = {
