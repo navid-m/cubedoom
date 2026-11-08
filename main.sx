@@ -2361,7 +2361,6 @@ fn load_map() bool = trust {
             if !spawnFound {
                 find_spawn()
             }
-            @print("cubedoom: loaded {s} with {d} enemy spawns\n", {MAP_PATH, enemySpawnCount})
             return true
         }
     }
